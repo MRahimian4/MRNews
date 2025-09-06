@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "title": "Central bank hints at rate hold",
+      "source": "Reuters",
+      "published": "2025-09-06T09:30:00Z",
+      "summary": "Policymakers signaled caution ahead of the next meeting.",
+      "url": "https://example.com/article-1"
+    },
+    {
+      "title": "Oil rises on supply concern",
+      "source": "Bloomberg",
+      "published": "2025-09-06T08:20:00Z",
+      "summary": "Brent climbs amid renewed supply risks and stronger demand outlook.",
+      "url": "https://example.com/article-2"
+    }
+  ]
+}
