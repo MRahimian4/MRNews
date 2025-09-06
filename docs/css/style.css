@@ -1,0 +1,55 @@
+:root{
+  --bg:#0b0f14; --card:#111827; --ink:#e5e7eb; --muted:#9ca3af; --accent:#60a5fa; --ok:#34d399; --warn:#f59e0b;
+  --border:#1f2937; --shadow:0 10px 25px rgba(0,0,0,.25); --radius:16px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; padding:24px; background:linear-gradient(180deg,#0b0f14,#0a0d12);
+  color:var(--ink); font:15px/1.6 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+.container{max-width:1100px; margin:0 auto}
+.header{
+  display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px;
+}
+.brand{display:flex; align-items:center; gap:10px}
+.brand .dot{width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 20px var(--accent)}
+.brand h1{margin:0; font-size:20px; font-weight:700; letter-spacing:.2px}
+.toolbar{
+  display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+}
+.select, .btn{
+  background:var(--card); border:1px solid var(--border); color:var(--ink);
+  border-radius:12px; padding:10px 12px; box-shadow:var(--shadow);
+}
+.select{appearance:none}
+.btn{cursor:pointer}
+.grid{
+  display:grid; gap:14px; grid-template-columns:1.2fr .8fr;
+}
+@media (max-width:900px){ .grid{grid-template-columns:1fr} }
+.card{
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:14px;
+}
+.card h3{margin:0 0 8px 0; font-size:16px}
+.chart{
+  width:100%; height:260px; display:block; background:linear-gradient(180deg,rgba(255,255,255,.02),transparent);
+  border-radius:12px; border:1px dashed #273244;
+}
+.legend{display:flex; gap:10px; flex-wrap:wrap; margin-top:8px}
+.legend .pill{
+  display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--border); border-radius:999px; background:#0f1622;
+  font-size:12px; color:var(--muted)
+}
+.legend .dot{width:10px; height:10px; border-radius:50%}
+.section-title{margin:10px 0 8px 0; color:var(--muted); font-weight:600; letter-spacing:.3px}
+.list{display:grid; gap:10px}
+.item{
+  background:rgba(17,24,39,.6); border:1px solid var(--border); border-radius:12px; padding:12px;
+}
+.item h4{margin:0 0 6px 0; font-size:15px}
+.item .meta{font-size:12px; color:var(--muted)}
+.item p{margin:6px 0 0 0; color:#cbd5e1}
+.badge{padding:2px 8px; border-radius:999px; font-size:11px; border:1px solid var(--border); color:#cbd5e1}
+.footer{margin-top:18px; font-size:12px; color:var(--muted); text-align:center}
