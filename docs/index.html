@@ -1,8 +1,8 @@
 <!doctype html>
-<html>
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="utf-8" />
-    <title>News & FX</title>
+    <title>اخبار و نرخ‌ها</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="./css/style.css" />
   </head>
@@ -11,46 +11,46 @@
       <div class="header">
         <div class="brand">
           <span class="dot"></span>
-          <h1>News & FX</h1>
+          <h1>اخبار و نرخ‌ها</h1>
         </div>
         <div class="toolbar">
           <label>
-            <span class="badge">Mode</span>
+            <span class="badge">حالت</span>
             <select id="mode" class="select"></select>
           </label>
           <label>
-            <span class="badge">Category</span>
+            <span class="badge">دسته‌بندی</span>
             <select id="category" class="select"></select>
           </label>
           <label>
-            <span class="badge">Range</span>
+            <span class="badge">بازه زمانی</span>
             <select id="range" class="select">
-              <option value="1D">1D</option>
-              <option value="1W" selected>1W</option>
-              <option value="1M">1M</option>
+              <option value="1D">۱ روز</option>
+              <option value="1W" selected>۱ هفته</option>
+              <option value="1M">۱ ماه</option>
             </select>
           </label>
-          <button id="refresh" class="btn">Refresh</button>
+          <button id="refresh" class="btn">بروزرسانی</button>
         </div>
       </div>
 
       <div class="grid">
         <div class="card">
-          <h3>USD & EUR</h3>
+          <h3>دلار و یورو (با ریال)</h3>
           <canvas id="chart-fx" class="chart"></canvas>
           <div id="legend-fx" class="legend"></div>
         </div>
         <div class="card">
-          <h3>Gold (XAU)</h3>
+          <h3>طلا (با ریال)</h3>
           <canvas id="chart-gold" class="chart"></canvas>
           <div id="legend-gold" class="legend"></div>
         </div>
       </div>
 
-      <div class="section-title">Latest News</div>
+      <div class="section-title">آخرین اخبار</div>
       <div id="news-list" class="list"></div>
 
-      <div class="footer">Static MVP • GitHub Pages • Demo data (soon: live data)</div>
+      <div class="footer">نسخه نمایشی • GitHub Pages • داده‌های آزمایشی</div>
     </div>
 
     <script src="./js/app.js"></script>
