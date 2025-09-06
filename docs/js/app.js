@@ -152,3 +152,4 @@ function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-6*3600e3), n
     renderNews(news?.items || []);
   }
 })();
+ 
