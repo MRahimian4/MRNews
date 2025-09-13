@@ -9,6 +9,9 @@ const hsl = (i, a=0.9) => `hsl(${(i*67)%360} 80% ${a*50}%)`;
 // حالت اخبار (برای صفحه‌بندی)
 const NEWS_STATE = { all: [], filtered: [], page: 1, pageSize: 10 };
 
+// Tooltip state per-chart
+const ChartStates = {}; // id -> { series, geom, x, y, P, W, H, tMin, tMax, yMin, yMax }
+
 // --- کمک‌تابع‌های شبکه/داده
 async function fetchJSON(path){
   try{ const r = await fetch(path, {cache: "no-store"}); if(!r.ok) return null; return await r.json(); }
@@ -24,7 +27,7 @@ function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-29*24*3600e3
   });
 }
 
-// ————— نمودار —————
+// ————— Chart Core —————
 function fitCanvas(cnv){
   const rect = cnv.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
@@ -35,11 +38,50 @@ function fitCanvas(cnv){
   return ctx;
 }
 
-function drawLineChart(canvasId, series, unitLabel=""){
+function get5DayTicks(tMin, tMax){
+  const MS_DAY = 24*3600*1000;
+  const start = new Date(tMin);
+  start.setHours(0,0,0,0);
+  // به اولین مضرب 5 روز برسیم
+  const offset = ((start.getTime() - tMin) % (5*MS_DAY) + 5*MS_DAY) % (5*MS_DAY);
+  let t = start.getTime() + (offset || 0);
+  const ticks = [];
+  for(; t <= tMax + MS_DAY; t += 5*MS_DAY){
+    ticks.push(t);
+  }
+  return ticks;
+}
+
+function drawLabel(ctx, text, x, y, align="left"){
+  ctx.save();
+  ctx.font = "12px system-ui";
+  const padX = 6, padY = 3;
+  const w = ctx.measureText(text).width + padX*2;
+  const h = 20;
+  let bx = x, by = y - h/2;
+  if(align==="right") bx = x - w;
+  if(align==="center") bx = x - w/2;
+  // پس‌زمینه
+  ctx.fillStyle = "rgba(15,22,34,.95)";
+  ctx.strokeStyle = "#1f2937";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, w, h, 6);
+  ctx.fill(); ctx.stroke();
+  // متن
+  ctx.fillStyle = "#e5e7eb";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillText(text, bx + padX, y);
+  ctx.restore();
+}
+
+// Base render (شبکه، خطوط، برچسب‌های ۵روزه، آخرین مقدار)
+function renderBaseChart(canvasId, series, unitLabel=""){
   const cnv = document.getElementById(canvasId);
   const ctx = fitCanvas(cnv);
   const W = cnv.clientWidth, H = cnv.clientHeight;
-  const P = { l: 64, r: 16, t: 22, b: 36 };
+  const P = { l: 64, r: 16, t: 16, b: 40 }; // کمی پایین بیشتر برای برچسب تاریخ
 
   const pts = series.flatMap(s => s.points.map(p => ({ t:+new Date(p.t), v:+p.v })));
   if(!pts.length){ ctx.fillStyle="#94a3b8"; ctx.fillText("داده‌ای موجود نیست", 12, 20); return; }
@@ -54,34 +96,46 @@ function drawLineChart(canvasId, series, unitLabel=""){
   const x = t => P.l + ((t - tMin) / (tMax - tMin || 1)) * (W - P.l - P.r);
   const y = v => H - P.b - ((v - yMin) / (yMax - yMin || 1)) * (H - P.t - P.b);
 
-  // grid
+  // grid Y
   ctx.strokeStyle = "#273244"; ctx.lineWidth = 1;
   ctx.beginPath();
   const ticksY = 4;
   for(let i=0;i<=ticksY;i++){ const gy = P.t + i*(H-P.t-P.b)/ticksY; ctx.moveTo(P.l, gy); ctx.lineTo(W-P.r, gy); }
   ctx.stroke();
 
-  // X labels (تاریخ شروع و پایان)
-  ctx.fillStyle = "#cbd5e1"; ctx.font = "12px system-ui"; ctx.textBaseline = "alphabetic";
-  ctx.textAlign = "left";  ctx.fillText(fmtDate(new Date(tMin).toISOString()), P.l, H-8);
-  ctx.textAlign = "right"; ctx.fillText(fmtDate(new Date(tMax).toISOString()), W - P.r, H-8);
-
-  // Y labels + عنوان محور
-  ctx.textAlign = "right";
+  // Y labels (فقط اعداد؛ عنوان محور حذف شد تا تداخلی نداشته باشد)
+  ctx.fillStyle = "#cbd5e1"; ctx.font = "12px system-ui"; ctx.textBaseline = "middle"; ctx.textAlign = "right";
   for(let i=0;i<=ticksY;i++){
     const val = yMax - (i*(yMax-yMin)/ticksY);
     const yy  = P.t + i*(H-P.t-P.b)/ticksY;
-    ctx.fillText(NFcompact.format(val), P.l - 8, yy + 4);
-  }
-  if(unitLabel){
-    ctx.save();
-    ctx.fillStyle = "#9ca3af"; ctx.font = "12px system-ui";
-    ctx.translate(16, H/2); ctx.rotate(-Math.PI/2);
-    ctx.textAlign = "center"; ctx.fillText(`واحد: ${unitLabel}`, 0, 0);
-    ctx.restore();
+    ctx.fillText(NFcompact.format(val), P.l - 8, yy);
   }
 
-  // series
+  // grid X: هر ۵ روز
+  const ticks5 = get5DayTicks(tMin, tMax);
+  ctx.save();
+  ctx.setLineDash([4,4]);
+  ctx.strokeStyle = "#1e2a3a";
+  ctx.beginPath();
+  ticks5.forEach(tk => {
+    const gx = x(tk);
+    if (gx >= P.l && gx <= W-P.r){
+      ctx.moveTo(gx, P.t); ctx.lineTo(gx, H-P.b);
+    }
+  });
+  ctx.stroke();
+  ctx.restore();
+
+  // X labels: تاریخ‌های ۵ روزه
+  ctx.fillStyle = "#9fb0c5"; ctx.font = "11px system-ui"; ctx.textBaseline = "alphabetic"; ctx.textAlign = "center";
+  ticks5.forEach(tk => {
+    const gx = x(tk);
+    if (gx >= P.l && gx <= W-P.r){
+      ctx.fillText(fmtDate(new Date(tk).toISOString()), gx, H-8);
+    }
+  });
+
+  // series lines
   series.forEach((s, i) => {
     const col = hsl(i,.9);
     ctx.strokeStyle = col; ctx.lineWidth = 2;
@@ -92,8 +146,144 @@ function drawLineChart(canvasId, series, unitLabel=""){
     });
     ctx.stroke();
   });
+
+  // مقادیر هر ۵ روز: نزدیک‌ترین نقطه هر سری
+  ctx.font = "12px system-ui";
+  series.forEach((s, i) => {
+    const col = hsl(i,.9);
+    const arr = s.points.slice().sort((a,b)=>+new Date(a.t)-+new Date(b.t));
+    ticks5.forEach(tk => {
+      // نزدیک‌ترین نقطه (در محدودهٔ ~ 48 ساعت)
+      let nearest = null, dmin = Infinity;
+      arr.forEach(p => {
+        const d = Math.abs(+new Date(p.t) - tk);
+        if(d < dmin){ dmin = d; nearest = p; }
+      });
+      if(nearest && dmin <= 48*3600*1000){
+        const X = x(+new Date(nearest.t)), Y = y(+nearest.v);
+        // نقطهٔ کوچک
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(X, Y, 2.5, 0, Math.PI*2); ctx.fill();
+        // برچسب مقدار (compact)
+        drawLabel(ctx, NFcompact.format(nearest.v), X + 6, Y - 14, "left");
+      }
+    });
+  });
+
+  // آخرین مقدار هر سری
+  series.forEach((s, i) => {
+    const col = hsl(i,.9);
+    const last = s.points.slice().sort((a,b)=>+new Date(a.t)-+new Date(b.t)).at(-1);
+    if(!last) return;
+    const X = x(+new Date(last.t)), Y = y(+last.v);
+    // دایرهٔ آخرین نقطه
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X, Y, 3, 0, Math.PI*2); ctx.fill();
+    // برچسب عدد آخر (راست‌چین کنار نقطه تا بیرون نزنه)
+    drawLabel(ctx, NFcompact.format(last.v), Math.min(X+8, W-P.r-4), Y, "left");
+  });
+
+  // ذخیرهٔ وضعیت برای رویدادهای Hover
+  ChartStates[canvasId] = { series, P, W, H, tMin, tMax, yMin, yMax, x, y };
 }
 
+function ensureTooltip(id){
+  const elId = `tt-${id}`;
+  let tip = document.getElementById(elId);
+  if(!tip){
+    tip = document.createElement("div");
+    tip.className = "chart-tooltip";
+    tip.id = elId;
+    tip.style.display = "none";
+    document.body.appendChild(tip);
+  }
+  return tip;
+}
+
+function attachHover(canvasId){
+  const cnv = document.getElementById(canvasId);
+  if(!cnv || cnv.__hoverAttached) return;
+  cnv.__hoverAttached = true;
+
+  const tip = ensureTooltip(canvasId);
+
+  cnv.addEventListener("mouseleave", () => {
+    tip.style.display = "none";
+    // بازنقاشی بدون لایهٔ راهنما
+    const st = ChartStates[canvasId];
+    if(st) renderBaseChart(canvasId, st.series, "ریال");
+  });
+
+  cnv.addEventListener("mousemove", (e) => {
+    const st = ChartStates[canvasId];
+    if(!st) return;
+    const rect = cnv.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const { P, W, H, tMin, tMax, x, y } = st;
+
+    // بیرون از ناحیه رسم؟
+    if(px < P.l || px > W-P.r || py < P.t || py > H-P.b){
+      tip.style.display = "none";
+      renderBaseChart(canvasId, st.series, "ریال");
+      return;
+    }
+
+    // زمان متناظر با x
+    const ratio = (px - P.l) / (W - P.l - P.r);
+    const tHover = tMin + ratio * (tMax - tMin);
+
+    // نزدیک‌ترین نقاط هر سری
+    const rows = [];
+    const markers = [];
+    st.series.forEach((s, i) => {
+      let nearest = null, dmin = Infinity;
+      s.points.forEach(p => {
+        const d = Math.abs(+new Date(p.t) - tHover);
+        if(d < dmin){ dmin = d; nearest = p; }
+      });
+      if(nearest){
+        rows.push({ label: s.label, color: hsl(i,.9), value: nearest.v });
+        markers.push({ x: x(+new Date(nearest.t)), y: y(nearest.v), color: hsl(i,.9) });
+      }
+    });
+
+    // بازکِشی پایه + لایهٔ راهنما
+    renderBaseChart(canvasId, st.series, "ریال");
+    const ctx = cnv.getContext("2d");
+    // خط عمودی
+    ctx.save();
+    ctx.strokeStyle = "rgba(100,150,255,.5)";
+    ctx.setLineDash([5,5]);
+    ctx.beginPath(); ctx.moveTo(px, st.P.t); ctx.lineTo(px, st.H - st.P.b); ctx.stroke();
+    ctx.restore();
+    // مارکرها
+    markers.forEach(m => {
+      ctx.fillStyle = m.color;
+      ctx.beginPath(); ctx.arc(m.x, m.y, 3.5, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = "#0b0f14"; ctx.lineWidth = 1; ctx.stroke();
+    });
+
+    // Tooltip HTML
+    const html = [
+      `<div class="row" style="margin-bottom:4px"><strong>${fmtDateTime(new Date(tHover).toISOString())}</strong></div>`,
+      ...rows.map(r => `<div class="row"><span><span class="dot" style="background:${r.color}"></span> ${r.label}</span><span class="val">${NFcompact.format(r.value)}</span></div>`)
+    ].join("");
+    tip.innerHTML = html;
+    tip.style.display = "block";
+
+    // جایگذاری Tooltip
+    const pad = 14;
+    let left = e.clientX + pad, top = e.clientY + pad;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const tw = tip.offsetWidth || 220, th = tip.offsetHeight || 80;
+    if(left + tw > vw - 8) left = e.clientX - tw - pad;
+    if(top + th > vh - 8) top = e.clientY - th - pad;
+    tip.style.left = `${left}px`;
+    tip.style.top  = `${top}px`;
+  });
+}
+
+// Legend
 function renderLegend(legendId, { title, series, updatedIso, source, note }){
   const leg = document.getElementById(legendId);
   if(!leg) return;
@@ -209,10 +399,10 @@ function renderNewsPage(){
     if(clearLegend){ ["legend-fx","legend-gold"].forEach(id => { const e=$("#"+id); if(e){e.innerHTML="";} }); }
 
     const [fx, gold, news, rates] = await Promise.all([
-      fetchJSON("./data/fx_latest.json"),      // شامل USD→IRR و EUR→IRR (۳۰ روزه)
-      fetchJSON("./data/gold_latest.json"),    // شامل XAU→USD (۳۰ روزه)
+      fetchJSON("./data/fx_latest.json"),      // USD→IRR و EUR→IRR (۳۰ روزه)
+      fetchJSON("./data/gold_latest.json"),    // XAU→USD (۳۰ روزه)
       fetchJSON("./data/news_macro.json"),
-      fetchJSON("./data/rates.json")           // شامل timestamp و منبع
+      fetchJSON("./data/rates.json")           // timestamp و منبع
     ]);
 
     // --- سری‌های FX
@@ -228,9 +418,9 @@ function renderNewsPage(){
     const goldIRRpoints = multiplyGoldByUsdIrr(goldUSD.points, usdIRR.points);
     const goldIRRseries = [{ label: "طلا (XAU→IRR)", unit: "IRR", points: goldIRRpoints }];
 
-    // ———— رسم نمودارها
-    // 1) طلا به ریال
-    drawLineChart("chart-gold", goldIRRseries, "ریال");
+    // ———— رسم نمودارها + Hover
+    renderBaseChart("chart-gold", goldIRRseries, "ریال");
+    attachHover("chart-gold");
     renderLegend("legend-gold", {
       title: "قیمت هر اونس طلا به ریال — روند ۳۰ روزه",
       series: goldIRRseries,
@@ -239,8 +429,8 @@ function renderNewsPage(){
       note: "محاسبهٔ روزانه: (XAU→USD) × (USD→IRR)"
     });
 
-    // 2) ارز به ریال (USD & EUR)
-    drawLineChart("chart-fx", fxSeries, "ریال");
+    renderBaseChart("chart-fx", fxSeries, "ریال");
+    attachHover("chart-fx");
     renderLegend("legend-fx", {
       title: "نرخ ارز به ریال — دلار و یورو — روند ۳۰ روزه",
       series: fxSeries,
