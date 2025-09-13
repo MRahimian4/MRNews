@@ -14,7 +14,7 @@ async function fetchJSON(path){
   catch{ return null; }
 }
 
-// دمو سری برای مواقع بدون فایل
+// دمو سری
 function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-24*3600e3), n=48, base=50){
   return labels.map((lab, i) => {
     const pts = []; let v = base + i*2;
@@ -23,7 +23,7 @@ function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-24*3600e3), 
   });
 }
 
-// تبدیل به ریال بر اساس واحد سری
+// تبدیل به ریال
 function toRialByUnit(value, seriesUnit, rates){
   if (seriesUnit === "IRR") return value;
   if (seriesUnit === "USD") return value * (rates?.USD || 0);
@@ -31,7 +31,7 @@ function toRialByUnit(value, seriesUnit, rates){
   return value;
 }
 
-// اندازه‌دهی بوم
+// بوم
 function fitCanvas(cnv){
   const rect = cnv.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
@@ -42,7 +42,7 @@ function fitCanvas(cnv){
   return ctx;
 }
 
-// رسم چارت خطی
+// چارت
 function drawLineChart(canvasId, series, legendId, unit){
   const cnv = document.getElementById(canvasId);
   const ctx = fitCanvas(cnv);
@@ -62,19 +62,19 @@ function drawLineChart(canvasId, series, legendId, unit){
   const x = t => P.l + ((t - tMin) / (tMax - tMin || 1)) * (W - P.l - P.r);
   const y = v => H - P.b - ((v - yMin) / (yMax - yMin || 1)) * (H - P.t - P.b);
 
-  // شبکه
+  // grid
   ctx.strokeStyle = "#273244"; ctx.lineWidth = 1;
   ctx.beginPath();
   const ticks = 4;
   for(let i=0;i<=ticks;i++){ const gy = P.t + i*(H-P.t-P.b)/ticks; ctx.moveTo(P.l, gy); ctx.lineTo(W-P.r, gy); }
   ctx.stroke();
 
-  // محور X
+  // X
   ctx.fillStyle = "#cbd5e1"; ctx.font = "12px system-ui"; ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";  ctx.fillText(new Date(tMin).toLocaleTimeString("fa-IR"), P.l, H-8);
   ctx.textAlign = "right"; ctx.fillText(new Date(tMax).toLocaleTimeString("fa-IR"), W - P.r, H-8);
 
-  // محور Y
+  // Y
   ctx.textAlign = "right";
   for(let i=0;i<=ticks;i++){
     const val = yMax - (i*(yMax-yMin)/ticks);
@@ -83,7 +83,7 @@ function drawLineChart(canvasId, series, legendId, unit){
     ctx.fillText(txt, P.l - 8, yy + 4);
   }
 
-  // سری‌ها
+  // series
   const leg = document.getElementById(legendId);
   if(leg){ leg.innerHTML = ""; }
   series.forEach((s, i) => {
@@ -101,36 +101,7 @@ function drawLineChart(canvasId, series, legendId, unit){
   if(leg){ const unitPill = document.createElement("span"); unitPill.className = "pill"; unitPill.innerHTML = unit==="rial" ? "واحد: ریال" : "واحد: اصلی"; leg.appendChild(unitPill); }
 }
 
-// --- اخبار: نرمال‌سازی، فیلتر، مرتب‌سازی، صفحه‌بندی
-
-// تبدیل ایمن رشته‌های تاریخ خبر به timestamp عددی (ms)
-function newsTimestamp(item){
-  // اگر بک‌اند published_ts داده باشد
-  if (typeof item?.published_ts === "number" && !isNaN(item.published_ts)) return item.published_ts;
-
-  let s = (item?.published || "").trim();
-  if (!s) return NaN;
-
-  // تلاش ۱: Date.parse مستقیم
-  let t = Date.parse(s);
-  if (!isNaN(t)) return t;
-
-  // تلاش ۲: جایگزینی GMT→UTC (برخی پارسرها)
-  t = Date.parse(s.replace("GMT", "UTC"));
-  if (!isNaN(t)) return t;
-
-  // تلاش ۳: اگر ISO ناقص بود، Z اضافه کنیم
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(s)) {
-    t = Date.parse(s + "Z");
-    if (!isNaN(t)) return t;
-  }
-
-  // آخرین تلاش: new Date(s).getTime()
-  t = new Date(s).getTime();
-  return isNaN(t) ? NaN : t;
-}
-
-// برش بازهٔ زمانی سری‌ها
+// بازهٔ زمانی سری‌ها
 function sliceByRange(series, range){
   const now = Date.now();
   const win = range==="1D" ? 1 : range==="1W" ? 7 : 30; // روز
@@ -139,21 +110,27 @@ function sliceByRange(series, range){
 }
 
 // فیلتر و مرتب‌سازی اخبار
+function newsTimestamp(it){
+  if (typeof it.published_ts === "number") return it.published_ts;
+  const s = (it.published || "").trim();
+  let t = Date.parse(s);
+  if (!isNaN(t)) return t;
+  t = Date.parse(s.replace("GMT","UTC"));
+  if (!isNaN(t)) return t;
+  return new Date(s).getTime();
+}
+
 function filterAndSortNews(items, range){
   const now = Date.now();
-  const win = range==="1D" ? 1 : range==="1W" ? 7 : 30; // روز
+  const win = range==="1D" ? 1 : range==="1W" ? 7 : 30;
   const from = now - win * 24*3600*1000;
-
-  const normalized = (items || [])
+  return (items || [])
     .map(it => ({ ...it, _ts: newsTimestamp(it) }))
-    .filter(it => !isNaN(it._ts)); // فقط آیتم‌های دارای تاریخ معتبر
-
-  return normalized
-    .filter(it => it._ts >= from)
+    .filter(it => !isNaN(it._ts) && it._ts >= from)
     .sort((a,b) => b._ts - a._ts);
 }
 
-// رندر اخبار یک صفحه
+// رندر
 function renderNews(items){
   const box = $("#news-list");
   if(!items.length){
@@ -163,7 +140,10 @@ function renderNews(items){
   box.innerHTML = items.map(it => `
     <div class="item">
       <h4>${it.title}</h4>
-      <div class="meta">${it.source || "نامشخص"} • ${fmtTime(it.published)}</div>
+      <div class="meta">
+        ${it.source || "نامشخص"} • ${fmtTime(it.published)}
+        ${it.translated ? ` • <span class="badge">ترجمه‌شده</span>` : ``}
+      </div>
       ${it.summary ? `<p>${it.summary}</p>` : ""}
       ${it.url ? `<div style="margin-top:6px"><a class="badge" href="${it.url}" target="_blank" rel="noopener">مشاهده خبر →</a></div>` : ""}
     </div>
@@ -175,9 +155,7 @@ function renderPager(){
   const pager = $("#news-pager");
   const total = NEWS_STATE.filtered.length;
   const pages = Math.max(1, Math.ceil(total / NEWS_STATE.pageSize));
-
   if(total === 0){ pager.innerHTML = ""; return; }
-
   pager.innerHTML = `
     <div class="pagerbar">
       <button class="btn" id="prevPage" ${NEWS_STATE.page<=1 ? "disabled" : ""}>قبلی</button>
@@ -185,9 +163,8 @@ function renderPager(){
       <button class="btn" id="nextPage" ${NEWS_STATE.page>=pages ? "disabled" : ""}>بعدی</button>
     </div>
   `;
-
   $("#prevPage")?.addEventListener("click", () => { if(NEWS_STATE.page>1){ NEWS_STATE.page--; renderNewsPage(); } });
-  $("#nextPage")?.addEventListener("click", () => { const pages = Math.max(1, Math.ceil(total / NEWS_STATE.pageSize)); if(NEWS_STATE.page<pages){ NEWS_STATE.page++; renderNewsPage(); } });
+  $("#nextPage")?.addEventListener("click", () => { if(NEWS_STATE.page<pages){ NEWS_STATE.page++; renderNewsPage(); } });
 }
 
 function renderNewsPage(){
@@ -199,12 +176,10 @@ function renderNewsPage(){
 
 // —— راه‌اندازی
 (async function init(){
-  // انتخاب‌گرها
   ($("#mode")).appendChild(new Option("واقع‌بینانه","واقع‌بینانه"));
   ($("#mode")).appendChild(new Option("پیش‌بینی","پیش‌بینی"));
   ["اقتصاد کلان","سیاست","انرژی","فناوری","اروپا","آمریکا"].forEach(c => ($("#category")).appendChild(new Option(c,c)));
 
-  // رویدادها
   $("#refresh").addEventListener("click", () => { NEWS_STATE.page = 1; loadAndRender(); });
   $("#range").addEventListener("change", () => { NEWS_STATE.page = 1; loadAndRender(); });
   $("#unit").addEventListener("change", loadAndRender);
@@ -225,10 +200,8 @@ function renderNewsPage(){
     const unit = $("#unit").value;   // original | rial
     const range = $("#range").value; // 1D | 1W | 1M
 
-    // سری‌ها
     let fxSeries   = (fx && fx.series)     ? fx.series   : demoSeries(["USD","EUR"]);
     let goldSeries = (gold && gold.series) ? gold.series : demoSeries(["XAU"], new Date(Date.now()-24*3600e3), 48, 2300);
-
     fxSeries   = sliceByRange(fxSeries, range);
     goldSeries = sliceByRange(goldSeries, range);
 
@@ -240,7 +213,6 @@ function renderNewsPage(){
     drawLineChart("chart-fx", fxSeries, "legend-fx", unit);
     drawLineChart("chart-gold", goldSeries, "legend-gold", unit);
 
-    // اخبار: نرمال‌سازی + فیلتر + مرتب‌سازی + صفحه‌بندی
     NEWS_STATE.all = (news && news.items) ? news.items : [];
     NEWS_STATE.filtered = filterAndSortNews(NEWS_STATE.all, range);
     renderNewsPage();
