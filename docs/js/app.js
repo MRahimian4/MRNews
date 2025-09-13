@@ -110,8 +110,6 @@ function renderLegend(legendId, { title, series, updatedIso, source, note }){
 }
 
 // ————— کمکی‌های سری زمانی —————
-function toDayKey(iso){ const d = new Date(iso); return d.toISOString().slice(0,10); }
-
 function multiplyGoldByUsdIrr(goldUSD, usdIRR){
   // goldUSD: [{t, v(USD)}], usdIRR: [{t, v(IRR per USD)}] → خروجی: XAU→IRR
   const a = goldUSD.slice().sort((x,y)=>+new Date(x.t)-+new Date(y.t));
@@ -219,11 +217,8 @@ function renderNewsPage(){
 
     // --- سری‌های FX
     let fxSeries = (fx && fx.series) ? fx.series : demoSeries(["دلار (USD→IRR)","یورو (EUR→IRR)"]);
-    // فقط ۳۰ روز — فایل‌ها ذاتاً ۳۰ روزه‌اند؛ اگر بیشتر بودند، کوتاه کنیم:
     fxSeries = fxSeries.map(s => {
-      const pts = s.points
-        .sort((a,b)=>+new Date(a.t)-+new Date(b.t))
-        .slice(-30);
+      const pts = s.points.sort((a,b)=>+new Date(a.t)-+new Date(b.t)).slice(-30);
       return { label: s.label, unit: "IRR", points: pts };
     });
 
