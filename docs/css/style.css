@@ -62,43 +62,30 @@ body{
 .pagerbar{display:flex; gap:10px; align-items:center; background:rgba(17,24,39,.6); border:1px solid var(--border); border-radius:999px; padding:6px 10px}
 
 /* ------------------- News images (unified size, no crop/zoom) ------------------- */
-/* قاب ثابت با نسبت 16:9 برای همه‌ی تصاویر */
 .item__img{
   position: relative;
   width: 100%;
-  aspect-ratio: 16/9;        /* نسبت تصویر یکسان برای همه */
+  aspect-ratio: 16/9;
   margin-bottom: 8px;
   background:#0f1622;
   border:1px solid var(--border);
   border-radius:10px;
-  overflow:hidden;           /* گوشه‌های گرد اعمال شود */
+  overflow:hidden;
 }
-
-/* اگر مرورگر aspect-ratio را پشتیبانی نکند، یک fallback ارتفاع ثابت بده */
 @supports not (aspect-ratio: 16/9){
   .item__img{ height: 220px; }
 }
-
-/* خودِ تصویر: بدون برش خوردن و بدون زوم‌شدن (contain) */
 .thumb{
   position:absolute;
   inset:0;
   width:100%;
   height:100%;
-  object-fit: contain;       /* کل تصویر داخل قاب دیده می‌شود؛ کات نمی‌شود */
-  object-position: center;   /* مرکز قاب */
-  background:#0f1622;        /* نوارهای کناری (letterbox) همرنگ پس‌زمینه */
+  object-fit: contain;       /* کل تصویر، بی‌کراپ */
+  object-position: center;
+  background:#0f1622;
   display:block;
   border:none;
 }
-
-/* اگر ترجیح می‌دهی عکس‌های کوچک بزرگ نشوند (کاملاً بدون بزرگ‌نمایی):
-   به‌جای contain از scale-down استفاده کن: */
-/*
-.thumb{ object-fit: scale-down; }
-*/
-
-/* ریسپانسیو: روی موبایل قاب کمی کوتاه‌تر شود */
 @media (max-width:640px){
   @supports not (aspect-ratio: 16/9){
     .item__img{ height: 180px; }
