@@ -139,13 +139,16 @@ function renderNews(items){
   }
   box.innerHTML = items.map(it => `
     <div class="item">
-      <h4>${it.title}</h4>
-      <div class="meta">
-        ${it.source || "نامشخص"} • ${fmtTime(it.published)}
-        ${it.translated ? ` • <span class="badge">ترجمه‌شده</span>` : ``}
+      ${it.image ? `<div class="item__img"><img class="thumb" loading="lazy" src="${it.image}" alt=""></div>` : ``}
+      <div class="item__body">
+        <h4>${it.title}</h4>
+        <div class="meta">
+          ${it.source || "نامشخص"} • ${fmtTime(it.published)}
+          ${it.translated ? ` • <span class="badge">ترجمه‌شده</span>` : ``}
+        </div>
+        ${it.summary ? `<p>${it.summary}</p>` : ""}
+        ${it.url ? `<div style="margin-top:6px"><a class="badge" href="${it.url}" target="_blank" rel="noopener">مشاهده خبر →</a></div>` : ""}
       </div>
-      ${it.summary ? `<p>${it.summary}</p>` : ""}
-      ${it.url ? `<div style="margin-top:6px"><a class="badge" href="${it.url}" target="_blank" rel="noopener">مشاهده خبر →</a></div>` : ""}
     </div>
   `).join("");
 }
@@ -217,4 +220,4 @@ function renderNewsPage(){
     NEWS_STATE.filtered = filterAndSortNews(NEWS_STATE.all, range);
     renderNewsPage();
   }
-})(); 
+})();
