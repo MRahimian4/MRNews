@@ -2,7 +2,8 @@
 const $ = s => document.querySelector(s);
 const NF = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 2 });
 const NFcompact = new Intl.NumberFormat("fa-IR", { notation: "compact", maximumFractionDigits: 1 });
-const fmtTime = iso => { try { return new Date(iso).toLocaleString("fa-IR"); } catch { return iso; } };
+const fmtDate = iso => { try { return new Date(iso).toLocaleDateString("fa-IR"); } catch { return iso; } };
+const fmtDateTime = iso => { try { return new Date(iso).toLocaleString("fa-IR"); } catch { return iso; } };
 const hsl = (i, a=0.9) => `hsl(${(i*67)%360} 80% ${a*50}%)`;
 
 // حالت اخبار (برای صفحه‌بندی)
@@ -14,24 +15,16 @@ async function fetchJSON(path){
   catch{ return null; }
 }
 
-// دمو سری
-function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-24*3600e3), n=48, base=50){
+// سری دمو (اگر فایل نبود)
+function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-29*24*3600e3), n=30, base=600000){
   return labels.map((lab, i) => {
-    const pts = []; let v = base + i*2;
-    for(let k=0;k<n;k++){ v += (Math.random()-.5)*0.6; pts.push({ t:new Date(+start + k*30*60*1000).toISOString(), v:+v.toFixed(2) }); }
-    return { label:lab, unit:"UNIT", points:pts };
+    const pts = []; let v = base + i*50000;
+    for(let k=0;k<n;k++){ v += (Math.random()-.5)*10000; pts.push({ t:new Date(+start + k*24*3600e3).toISOString(), v:+v.toFixed(0) }); }
+    return { label:lab, unit:"IRR", points:pts };
   });
 }
 
-// تبدیل به ریال
-function toRialByUnit(value, seriesUnit, rates){
-  if (seriesUnit === "IRR") return value;
-  if (seriesUnit === "USD") return value * (rates?.USD || 0);
-  if (seriesUnit === "EUR") return value * (rates?.EUR || 0);
-  return value;
-}
-
-// بوم
+// ————— نمودار —————
 function fitCanvas(cnv){
   const rect = cnv.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
@@ -42,20 +35,19 @@ function fitCanvas(cnv){
   return ctx;
 }
 
-// چارت (فقط رسم؛ لِجند جداگانه ساخته می‌شود)
-function drawLineChart(canvasId, series){
+function drawLineChart(canvasId, series, unitLabel=""){
   const cnv = document.getElementById(canvasId);
   const ctx = fitCanvas(cnv);
   const W = cnv.clientWidth, H = cnv.clientHeight;
-  const P = { l: 64, r: 16, t: 16, b: 32 };
+  const P = { l: 64, r: 16, t: 22, b: 36 };
 
-  const points = series.flatMap(s => s.points.map(p => ({ t:+new Date(p.t), v:+p.v })));
-  if(!points.length){ ctx.fillStyle="#94a3b8"; ctx.fillText("داده‌ای موجود نیست", 12, 20); return; }
+  const pts = series.flatMap(s => s.points.map(p => ({ t:+new Date(p.t), v:+p.v })));
+  if(!pts.length){ ctx.fillStyle="#94a3b8"; ctx.fillText("داده‌ای موجود نیست", 12, 20); return; }
 
-  const tMin = Math.min(...points.map(p=>p.t));
-  const tMax = Math.max(...points.map(p=>p.t));
-  const vMin = Math.min(...points.map(p=>p.v));
-  const vMax = Math.max(...points.map(p=>p.v));
+  const tMin = Math.min(...pts.map(p=>p.t));
+  const tMax = Math.max(...pts.map(p=>p.t));
+  const vMin = Math.min(...pts.map(p=>p.v));
+  const vMax = Math.max(...pts.map(p=>p.v));
   const pad  = (vMax - vMin) * 0.1 || 1;
   const yMin = vMin - pad, yMax = vMax + pad;
 
@@ -65,22 +57,28 @@ function drawLineChart(canvasId, series){
   // grid
   ctx.strokeStyle = "#273244"; ctx.lineWidth = 1;
   ctx.beginPath();
-  const ticks = 4;
-  for(let i=0;i<=ticks;i++){ const gy = P.t + i*(H-P.t-P.b)/ticks; ctx.moveTo(P.l, gy); ctx.lineTo(W-P.r, gy); }
+  const ticksY = 4;
+  for(let i=0;i<=ticksY;i++){ const gy = P.t + i*(H-P.t-P.b)/ticksY; ctx.moveTo(P.l, gy); ctx.lineTo(W-P.r, gy); }
   ctx.stroke();
 
-  // X
+  // X labels (تاریخ شروع و پایان)
   ctx.fillStyle = "#cbd5e1"; ctx.font = "12px system-ui"; ctx.textBaseline = "alphabetic";
-  ctx.textAlign = "left";  ctx.fillText(new Date(tMin).toLocaleTimeString("fa-IR"), P.l, H-8);
-  ctx.textAlign = "right"; ctx.fillText(new Date(tMax).toLocaleTimeString("fa-IR"), W - P.r, H-8);
+  ctx.textAlign = "left";  ctx.fillText(fmtDate(new Date(tMin).toISOString()), P.l, H-8);
+  ctx.textAlign = "right"; ctx.fillText(fmtDate(new Date(tMax).toISOString()), W - P.r, H-8);
 
-  // Y
+  // Y labels + عنوان محور
   ctx.textAlign = "right";
-  for(let i=0;i<=ticks;i++){
-    const val = yMax - (i*(yMax-yMin)/ticks);
-    const yy  = P.t + i*(H-P.t-P.b)/ticks;
-    const txt = NFcompact.format(val);
-    ctx.fillText(txt, P.l - 8, yy + 4);
+  for(let i=0;i<=ticksY;i++){
+    const val = yMax - (i*(yMax-yMin)/ticksY);
+    const yy  = P.t + i*(H-P.t-P.b)/ticksY;
+    ctx.fillText(NFcompact.format(val), P.l - 8, yy + 4);
+  }
+  if(unitLabel){
+    ctx.save();
+    ctx.fillStyle = "#9ca3af"; ctx.font = "12px system-ui";
+    ctx.translate(16, H/2); ctx.rotate(-Math.PI/2);
+    ctx.textAlign = "center"; ctx.fillText(`واحد: ${unitLabel}`, 0, 0);
+    ctx.restore();
   }
 
   // series
@@ -96,54 +94,48 @@ function drawLineChart(canvasId, series){
   });
 }
 
-// ساخت لِجند دقیق و قابل درک
-function renderLegend(legendId, { descriptor, unitLabel, series, updatedIso, source }){
+function renderLegend(legendId, { title, series, updatedIso, source, note }){
   const leg = document.getElementById(legendId);
   if(!leg) return;
   const parts = [];
-
-  // توضیح کلی نمودار
-  parts.push(`<span class="pill"><strong>${descriptor}</strong></span>`);
-
-  // واحد محور عمودی
-  parts.push(`<span class="pill">محور عمودی: ${unitLabel}</span>`);
-
-  // سری‌ها با رنگ همسان
+  parts.push(`<span class="pill"><strong>${title}</strong></span>`);
   (series || []).forEach((s, i) => {
     const col = hsl(i,.9);
     parts.push(`<span class="pill"><span class="dot" style="background:${col}"></span>${s.label}</span>`);
   });
-
-  // زمان بروزرسانی
-  if(updatedIso){
-    parts.push(`<span class="pill">آخرین به‌روزرسانی: ${fmtTime(updatedIso)}</span>`);
-  }
-
-  // منبع
-  if(source){
-    parts.push(`<span class="pill">منبع: ${source}</span>`);
-  }
-
+  if(updatedIso) parts.push(`<span class="pill">به‌روزرسانی: ${fmtDateTime(updatedIso)}</span>`);
+  if(source) parts.push(`<span class="pill">منبع: ${source}</span>`);
+  if(note) parts.push(`<span class="pill">${note}</span>`);
   leg.innerHTML = parts.join(" ");
 }
 
-// بازهٔ زمانی سری‌ها
-function sliceByRange(series, range){
-  const now = Date.now();
-  const win = range==="1D" ? 1 : range==="1W" ? 7 : 30; // روز
-  const from = now - win * 24*3600*1000;
-  return series.map(s => ({ label: s.label, unit: s.unit, points: s.points.filter(p => +new Date(p.t) >= from) }));
+// ————— کمکی‌های سری زمانی —————
+function toDayKey(iso){ const d = new Date(iso); return d.toISOString().slice(0,10); }
+
+function multiplyGoldByUsdIrr(goldUSD, usdIRR){
+  // goldUSD: [{t, v(USD)}], usdIRR: [{t, v(IRR per USD)}] → خروجی: XAU→IRR
+  const a = goldUSD.slice().sort((x,y)=>+new Date(x.t)-+new Date(y.t));
+  const b = usdIRR.slice().sort((x,y)=>+new Date(x.t)-+new Date(y.t));
+  if(!a.length || !b.length) return [];
+
+  let j = 0;
+  let lastRate = b[0].v;
+  const out = [];
+  for(let i=0; i<a.length; i++){
+    const tA = +new Date(a[i].t);
+    while(j+1 < b.length && +new Date(b[j+1].t) <= tA){ j++; lastRate = b[j].v; }
+    out.push({ t: a[i].t, v: a[i].v * (lastRate || 0) });
+  }
+  return out;
 }
 
-// کمکی: بیشینهٔ زمان از میان چند سری
-function maxTimeISO(series){
-  const all = (series||[]).flatMap(s => s.points.map(p => +new Date(p.t)));
-  if(!all.length) return "";
-  const t = new Date(Math.max(...all)).toISOString();
-  return t;
+function lastISO(series){
+  const pts = (series||[]).flatMap(s => s.points.map(p => +new Date(p.t)));
+  if(!pts.length) return "";
+  return new Date(Math.max(...pts)).toISOString();
 }
 
-// فیلتر و مرتب‌سازی اخبار
+// ————— اخبار —————
 function newsTimestamp(it){
   if (typeof it.published_ts === "number") return it.published_ts;
   const s = (it.published || "").trim();
@@ -153,22 +145,18 @@ function newsTimestamp(it){
   if (!isNaN(t)) return t;
   return new Date(s).getTime();
 }
-
-function filterAndSortNews(items, range){
+function filterAndSortNewsLast30(items){
   const now = Date.now();
-  const win = range==="1D" ? 1 : range==="1W" ? 7 : 30;
-  const from = now - win * 24*3600*1000;
+  const from = now - 30*24*3600*1000;
   return (items || [])
     .map(it => ({ ...it, _ts: newsTimestamp(it) }))
     .filter(it => !isNaN(it._ts) && it._ts >= from)
     .sort((a,b) => b._ts - a._ts);
 }
-
-// رندر خبرها
 function renderNews(items){
   const box = $("#news-list");
   if(!items.length){
-    box.innerHTML = `<div class="item"><h4>خبری در این بازه ثبت نشده</h4><p>بازه زمانی را تغییر دهید یا بعداً سر بزنید.</p></div>`;
+    box.innerHTML = `<div class="item"><h4>خبری در ۳۰ روز گذشته ثبت نشده</h4></div>`;
     return;
   }
   box.innerHTML = items.map(it => `
@@ -177,7 +165,7 @@ function renderNews(items){
       <div class="item__body">
         <h4>${it.title}</h4>
         <div class="meta">
-          ${it.source || "نامشخص"} • ${fmtTime(it.published)}
+          ${it.source || "نامشخص"} • ${fmtDateTime(it.published)}
           ${it.translated ? ` • <span class="badge">ترجمه‌شده</span>` : ``}
         </div>
         ${it.summary ? `<p>${it.summary}</p>` : ""}
@@ -186,8 +174,6 @@ function renderNews(items){
     </div>
   `).join("");
 }
-
-// صفحه‌بندی
 function renderPager(){
   const pager = $("#news-pager");
   const total = NEWS_STATE.filtered.length;
@@ -203,7 +189,6 @@ function renderPager(){
   $("#prevPage")?.addEventListener("click", () => { if(NEWS_STATE.page>1){ NEWS_STATE.page--; renderNewsPage(); } });
   $("#nextPage")?.addEventListener("click", () => { if(NEWS_STATE.page<pages){ NEWS_STATE.page++; renderNewsPage(); } });
 }
-
 function renderNewsPage(){
   const start = (NEWS_STATE.page - 1) * NEWS_STATE.pageSize;
   const pageItems = NEWS_STATE.filtered.slice(start, start + NEWS_STATE.pageSize);
@@ -213,13 +198,11 @@ function renderNewsPage(){
 
 // —— راه‌اندازی
 (async function init(){
-  ($("#mode")).appendChild(new Option("واقع‌بینانه","واقع‌بینانه"));
-  ($("#mode")).appendChild(new Option("پیش‌بینی","پیش‌بینی"));
-  ["اقتصاد کلان","سیاست","انرژی","فناوری","اروپا","آمریکا"].forEach(c => ($("#category")).appendChild(new Option(c,c)));
+  // کنترل‌ها را قفل می‌کنیم: ۳۰ روز و ریال
+  const unitSel = $("#unit"); if(unitSel){ unitSel.value = "rial"; unitSel.disabled = true; }
+  const rangeSel = $("#range"); if(rangeSel){ rangeSel.value = "1M"; rangeSel.disabled = true; }
 
-  $("#refresh").addEventListener("click", () => { NEWS_STATE.page = 1; loadAndRender(); });
-  $("#range").addEventListener("change", () => { NEWS_STATE.page = 1; loadAndRender(); });
-  $("#unit").addEventListener("change", loadAndRender);
+  $("#refresh")?.addEventListener("click", () => { NEWS_STATE.page = 1; loadAndRender(); });
 
   await loadAndRender();
   window.addEventListener("resize", () => loadAndRender(false));
@@ -228,67 +211,51 @@ function renderNewsPage(){
     if(clearLegend){ ["legend-fx","legend-gold"].forEach(id => { const e=$("#"+id); if(e){e.innerHTML="";} }); }
 
     const [fx, gold, news, rates] = await Promise.all([
-      fetchJSON("./data/fx_latest.json"),
-      fetchJSON("./data/gold_latest.json"),
+      fetchJSON("./data/fx_latest.json"),      // شامل USD→IRR و EUR→IRR (۳۰ روزه)
+      fetchJSON("./data/gold_latest.json"),    // شامل XAU→USD (۳۰ روزه)
       fetchJSON("./data/news_macro.json"),
-      fetchJSON("./data/rates.json")
+      fetchJSON("./data/rates.json")           // شامل timestamp و منبع
     ]);
 
-    const unitSel = $("#unit").value;   // original | rial
-    const range = $("#range").value;    // 1D | 1W | 1M
-
-    // --- FX ---
-    let fxSeries = (fx && fx.series) ? fx.series : demoSeries(["USD→IRR","EUR→IRR"]);
-    fxSeries = sliceByRange(fxSeries, range);
-
-    // برای FX، واحد محور عمودی عملاً همیشه «ریال» است
-    const fxUnitLabel = "ریال";
-    drawLineChart("chart-fx", fxSeries);
-
-    // لِجند FX
-    const fxDescriptor = "نرخ ارز: دلار و یورو به ریال (USD→IRR, EUR→IRR)";
-    const fxUpdatedIso = (rates && rates.timestamp) ? rates.timestamp : maxTimeISO(fxSeries);
-    const fxSource = (rates && rates.source) ? rates.source : "exchangerate.host";
-    renderLegend("legend-fx", {
-      descriptor: fxDescriptor,
-      unitLabel: fxUnitLabel,
-      series: fxSeries,
-      updatedIso: fxUpdatedIso,
-      source: fxSource
+    // --- سری‌های FX
+    let fxSeries = (fx && fx.series) ? fx.series : demoSeries(["دلار (USD→IRR)","یورو (EUR→IRR)"]);
+    // فقط ۳۰ روز — فایل‌ها ذاتاً ۳۰ روزه‌اند؛ اگر بیشتر بودند، کوتاه کنیم:
+    fxSeries = fxSeries.map(s => {
+      const pts = s.points
+        .sort((a,b)=>+new Date(a.t)-+new Date(b.t))
+        .slice(-30);
+      return { label: s.label, unit: "IRR", points: pts };
     });
 
-    // --- GOLD ---
-    let goldSeries = (gold && gold.series) ? gold.series : demoSeries(["XAU→USD"], new Date(Date.now()-24*3600e3), 48, 2300);
+    // --- سری طلا به ریال (XAU→IRR) با ضرب روزانه در USD→IRR
+    const goldUSD = (gold && gold.series && gold.series[0]) ? gold.series[0] : demoSeries(["XAU→USD"], new Date(Date.now()-29*24*3600e3), 30, 2300)[0];
+    const usdIRR  = fxSeries.find(s => /USD/i.test(s.label)) || fxSeries[0];
+    const goldIRRpoints = multiplyGoldByUsdIrr(goldUSD.points, usdIRR.points);
+    const goldIRRseries = [{ label: "طلا (XAU→IRR)", unit: "IRR", points: goldIRRpoints }];
 
-    // اگر کاربر «ریال» را انتخاب کرده، قیمت طلا را به ریال تبدیل کنیم
-    if(unitSel === "rial"){
-      goldSeries = goldSeries.map(s => ({
-        label: s.label.replace("USD", "IRR"),
-        unit: "IRR",
-        points: s.points.map(p => ({ t:p.t, v: toRialByUnit(p.v, "USD", rates) }))
-      }));
-    }
-    goldSeries = sliceByRange(goldSeries, range);
-    drawLineChart("chart-gold", goldSeries);
-
-    // لِجند GOLD
-    const goldUnitLabel = (unitSel === "rial") ? "ریال" : "USD";
-    const goldDescriptor = (unitSel === "rial")
-      ? "قیمت هر اونس طلا به ریال (XAU→IRR)"
-      : "قیمت هر اونس طلا به دلار (XAU→USD)";
-    const goldUpdatedIso = maxTimeISO(goldSeries);
-    const goldSource = "exchangerate.host + (در صورت تنظیم کلید: Metals API)";
+    // ———— رسم نمودارها
+    // 1) طلا به ریال
+    drawLineChart("chart-gold", goldIRRseries, "ریال");
     renderLegend("legend-gold", {
-      descriptor: goldDescriptor,
-      unitLabel: goldUnitLabel,
-      series: goldSeries,
-      updatedIso: goldUpdatedIso,
-      source: goldSource
+      title: "قیمت هر اونس طلا به ریال — روند ۳۰ روزه",
+      series: goldIRRseries,
+      updatedIso: lastISO(goldIRRseries),
+      source: "exchangerate.host × open.er-api (تبدیل USD→IRR)",
+      note: "محاسبهٔ روزانه: (XAU→USD) × (USD→IRR)"
     });
 
-    // --- News ---
+    // 2) ارز به ریال (USD & EUR)
+    drawLineChart("chart-fx", fxSeries, "ریال");
+    renderLegend("legend-fx", {
+      title: "نرخ ارز به ریال — دلار و یورو — روند ۳۰ روزه",
+      series: fxSeries,
+      updatedIso: (rates && rates.timestamp) ? rates.timestamp : lastISO(fxSeries),
+      source: (rates && rates.source) ? rates.source : "exchangerate.host"
+    });
+
+    // --- اخبار (۳۰ روز گذشته)
     NEWS_STATE.all = (news && news.items) ? news.items : [];
-    NEWS_STATE.filtered = filterAndSortNews(NEWS_STATE.all, range);
+    NEWS_STATE.filtered = filterAndSortNewsLast30(NEWS_STATE.all);
     renderNewsPage();
   }
 })();
