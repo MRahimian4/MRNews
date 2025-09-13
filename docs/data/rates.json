@@ -1,5 +1,6 @@
 {
-  "USD": 600000,
-  "EUR": 650000,
-  "XAU": 35000000
+  "USD": 42172.999129,
+  "EUR": 49508.347425,
+  "timestamp": "2025-09-13T13:15:32Z",
+  "source": "open.er-api.com+exchangerate.host"
 }
