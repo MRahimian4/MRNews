@@ -3,9 +3,7 @@ const $ = s => document.querySelector(s);
 const NF = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 2 });
 const NFcompact = new Intl.NumberFormat("fa-IR", { notation: "compact", maximumFractionDigits: 1 });
 
-const fmtTime = iso => {
-  try { return new Date(iso).toLocaleString("fa-IR"); } catch { return iso; }
-};
+const fmtTime = iso => { try { return new Date(iso).toLocaleString("fa-IR"); } catch { return iso; } };
 const hsl = (i, a=0.8) => `hsl(${(i*67)%360} 80% ${a*50}%)`;
 
 // خواندن JSON (اگر نبود null)
@@ -14,7 +12,7 @@ async function fetchJSON(path){
   catch{ return null; }
 }
 
-// دمو دیتا برای مواقع بدون فایل
+// دمو برای مواقع بدون فایل
 function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-24*3600e3), n=48, base=50){
   return labels.map((lab, i) => {
     const pts = []; let v = base + i*2;
@@ -86,7 +84,7 @@ function drawLineChart(canvasId, series, legendId, unit){
   ctx.textAlign = "right";
   ctx.fillText(new Date(tMax).toLocaleTimeString("fa-IR"), W - P.r, H-8);
 
-  // محور Y (برچسب برای هر خط شبکه)
+  // محور Y
   ctx.textAlign = "right";
   for(let i=0;i<=ticks;i++){
     const val = yMax - (i*(yMax-yMin)/ticks);
@@ -125,7 +123,7 @@ function drawLineChart(canvasId, series, legendId, unit){
   }
 }
 
-// برش بازهٔ زمانی
+// برش بازهٔ زمانی برای سری‌ها
 function sliceByRange(series, range){
   const now = Date.now();
   const win = range==="1D" ? 1 : range==="1W" ? 7 : 30; // روز
@@ -135,6 +133,19 @@ function sliceByRange(series, range){
     unit: s.unit,
     points: s.points.filter(p => +new Date(p.t) >= from)
   }));
+}
+
+// فیلتر بازهٔ زمانی برای خبرها
+function filterNewsByRange(items, range){
+  const now = Date.now();
+  const win = range==="1D" ? 1 : range==="1W" ? 7 : 30; // روز
+  const from = now - win * 24*3600*1000;
+  return (items || [])
+    .filter(it => {
+      const ts = Date.parse(it.published); // ISO-UTC
+      return !isNaN(ts) && ts >= from;
+    })
+    .sort((a,b) => Date.parse(b.published) - Date.parse(a.published));
 }
 
 // —— راه‌اندازی
@@ -159,30 +170,26 @@ function sliceByRange(series, range){
       fetchJSON("./data/fx_latest.json"),
       fetchJSON("./data/gold_latest.json"),
       fetchJSON("./data/news_macro.json"),
-      fetchJSON("./data/rates.json") // ممکن است وجود نداشته باشد
+      fetchJSON("./data/rates.json")
     ]);
 
     const unit = $("#unit").value;   // original | rial
     const range = $("#range").value; // 1D | 1W | 1M
 
-    // اگر فایل‌های واقعی نبودند، دمو بساز
-    let fxSeries   = (fx && fx.series)   ? fx.series   : demoSeries(["USD","EUR"]);
+    // سری‌ها
+    let fxSeries   = (fx && fx.series)     ? fx.series   : demoSeries(["USD","EUR"]);
     let goldSeries = (gold && gold.series) ? gold.series : demoSeries(["XAU"], new Date(Date.now()-24*3600e3), 48, 2300);
 
-    // برش بازه
-    fxSeries = sliceByRange(fxSeries, range);
+    fxSeries   = sliceByRange(fxSeries, range);
     goldSeries = sliceByRange(goldSeries, range);
 
-    // تبدیل واحد به «ریال» در صورت انتخاب
     if(unit === "rial"){
       fxSeries = fxSeries.map(s => ({
-        label: s.label,
-        unit: "IRR",
+        label: s.label, unit: "IRR",
         points: s.points.map(p => ({ t:p.t, v: toRialByUnit(p.v, s.unit || "IRR", rates) }))
       }));
       goldSeries = goldSeries.map(s => ({
-        label: s.label,
-        unit: "IRR",
+        label: s.label, unit: "IRR",
         points: s.points.map(p => ({ t:p.t, v: toRialByUnit(p.v, s.unit || "USD", rates) }))
       }));
     }
@@ -190,8 +197,9 @@ function sliceByRange(series, range){
     drawLineChart("chart-fx", fxSeries, "legend-fx", unit);
     drawLineChart("chart-gold", goldSeries, "legend-gold", unit);
 
-    // اخبار
-    const items = news?.items || [];
+    // اخبار (فیلتر بر اساس همان بازه)
+    const itemsAll = (news && news.items) ? news.items : [];
+    const items = filterNewsByRange(itemsAll, range);
     renderNews(items);
   }
 
@@ -199,7 +207,7 @@ function sliceByRange(series, range){
   function renderNews(items){
     const box = $("#news-list");
     if(!items.length){
-      box.innerHTML = `<div class="item"><h4>خبری وجود ندارد</h4><p>دادهٔ آزمایشی</p></div>`;
+      box.innerHTML = `<div class="item"><h4>خبری در این بازه ثبت نشده</h4><p>بازه زمانی را عوض کنید یا بعداً دوباره تلاش کنید.</p></div>`;
       return;
     }
     box.innerHTML = items.map(it => `
