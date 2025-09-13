@@ -1,25 +1,31 @@
 # scripts/fetch_data.py
-# نسخه‌ی پایدار (fault-tolerant):
-# - اگر درخواست‌های اینترنتی خطا دهند، با داده‌ی fallback فایل‌ها را می‌سازد.
-# - همیشه فایل‌ها را می‌نویسد و با exit code 0 تمام می‌شود.
+# جمع‌آوری نرخ‌ها (USD→IRR, EUR→IRR, XAU→USD) + خبرهای RSS
+# خروجی‌ها: docs/data/fx_latest.json , docs/data/gold_latest.json , docs/data/news_macro.json
+# پایدار در برابر خطای شبکه؛ در صورت خطا از داده‌ی جایگزین استفاده می‌کند.
 
-import json, os, sys, datetime as dt
-from typing import List, Dict, Any, Optional
+from __future__ import annotations
+import json
+import os
+import sys
+import datetime as dt
+from typing import Any, Dict, List, Optional
 
+# --- وابستگی شبکه
 try:
-    import requests
-except Exception:
-    # GitHub Actions باید requests را نصب کند؛ اگر نشد، از حداقل خروجی استفاده می‌کنیم
-    requests = None
+    import requests  # نصب می‌شود داخل GitHub Actions
+except Exception:  # اگر به هر دلیل نصب نشد
+    requests = None  # type: ignore
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(ROOT, "docs", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 UA_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; DataFetcher/1.0; +https://github.com/)",
+    "User-Agent": "Mozilla/5.0 (compatible; MRNews-DataFetcher/1.0; +https://github.com/)",
     "Accept": "application/json, text/xml, application/xml;q=0.9, */*;q=0.8",
 }
+
+# ---------------------------- utilities
 
 def save_json(path: str, obj: Any) -> None:
     with open(path, "w", encoding="utf-8") as f:
@@ -45,10 +51,10 @@ def http_get_bytes(url: str, timeout: int = 20) -> Optional[bytes]:
     except Exception:
         return None
 
-# -------- نرخ‌ها
+# ---------------------------- FX helpers
 
 def timeseries(base: str, symbol: str, days: int = 30) -> List[Dict[str, Any]]:
-    """سری زمانی از exchangerate.host؛ در خطا: [] برمی‌گرداند."""
+    """گرفتن سری‌زمانی از exchangerate.host؛ در خطا، لیست خالی."""
     end = dt.date.today()
     start = end - dt.timedelta(days=days)
     url = (
@@ -74,7 +80,7 @@ def latest(base: str, symbol: str) -> Optional[float]:
     return round(float(val), 6) if val is not None else None
 
 def fallback_flat_series(days: int, value: float) -> List[Dict[str, Any]]:
-    """سری ثابت برای زمانی که اینترنت/داده نداریم."""
+    """سری ثابت (برای زمانی که اینترنت/داده در دسترس نیست)."""
     end = dt.date.today()
     start = end - dt.timedelta(days=days)
     cur = start
@@ -84,12 +90,13 @@ def fallback_flat_series(days: int, value: float) -> List[Dict[str, Any]]:
         cur += dt.timedelta(days=1)
     return out
 
+# ---------------------------- builders
+
 def build_fx() -> None:
-    # تلاش برای گرفتن USD→IRR و EUR→IRR
+    """USD→IRR و EUR→IRR (۳۰ روز اخیر)"""
     usd_irr = timeseries("USD", "IRR", days=30)
     eur_irr = timeseries("EUR", "IRR", days=30)
 
-    # اگر خالی بود، fallback: از آخرین مقدار یا مقدار حدودی استفاده کن
     if not usd_irr:
         last = latest("USD", "IRR") or 600000.0
         usd_irr = fallback_flat_series(30, last)
@@ -105,10 +112,8 @@ def build_fx() -> None:
     }
     save_json(os.path.join(DATA_DIR, "fx_latest.json"), out)
 
-# -------- طلا
-
 def build_gold() -> None:
-    # طلا: XAU→USD (۳۰ روز)
+    """طلا: XAU→USD (۳۰ روز اخیر)؛ در خطا، fallback."""
     xau_usd = timeseries("XAU", "USD", days=30)
     if not xau_usd:
         last = latest("XAU", "USD") or 2300.0
@@ -117,9 +122,8 @@ def build_gold() -> None:
     out = {"series": [{"label": "طلا (XAU→USD)", "unit": "USD", "points": xau_usd}]}
     save_json(os.path.join(DATA_DIR, "gold_latest.json"), out)
 
-# -------- اخبار (RSS)
-
 def build_news() -> None:
+    """خواندن چند RSS/Atom ساده؛ در خطا، یک آیتم نمایشی می‌نویسد."""
     feeds = [
         "https://feeds.bbci.co.uk/persian/rss.xml",
         "https://www.reuters.com/world/rss",
@@ -128,68 +132,65 @@ def build_news() -> None:
 
     try:
         import xml.etree.ElementTree as ET
-        import urllib.parse
+        from urllib.parse import urlparse
     except Exception:
         ET = None  # type: ignore
 
     if ET is not None:
+        ATOM_NS = "{http://www.w3.org/2005/Atom}"
         for url in feeds:
             try:
                 raw = http_get_bytes(url, timeout=20)
                 if not raw:
                     continue
                 root = ET.fromstring(raw)
-                # RSS
-                for item in root.findall(".//item"):
-                    title = (item.findtext("title") or "").strip()
-                    link = (item.findtext("link") or "").strip()
-                    pub = (item.findtext("pubDate") or "").strip()
-                    desc = (item.findtext("description") or "").strip()
+
+                # RSS items
+                for it in root.findall(".//item"):
+                    title = (it.findtext("title") or "").strip()
+                    link = (it.findtext("link") or "").strip()
+                    pub  = (it.findtext("pubDate") or "").strip()
+                    desc = (it.findtext("description") or "").strip()
                     if title and link:
-                        from urllib.parse import urlparse
                         items.append({
                             "title": title,
                             "source": urlparse(link).netloc or "RSS",
                             "published": pub,
-                            "summary": (desc or "")[:280],
+                            "summary": desc[:280],
                             "url": link,
                         })
-                # Atom
-                ns = "{http://www.w3.org/2005/Atom}"
-                for entry in root.findall(f".//{ns}entry"):
-                    title = (entry.findtext(f"{ns}title") or "").strip()
-                    link_el = entry.find(f"{ns}link")
+
+                # Atom entries
+                for entry in root.findall(f".//{ATOM_NS}entry"):
+                    title = (entry.findtext(f"{ATOM_NS}title") or "").strip()
+                    link_el = entry.find(f"{ATOM_NS}link")
                     link = (link_el.get("href") if link_el is not None else "").strip()
-                    pub = (entry.findtext(f"{ns}updated") or "").strip()
-                    summ = (entry.findtext(f"{ns}summary") or "").strip()
+                    pub  = (entry.findtext(f"{ATOM_NS}updated") or "").strip()
+                    summ = (entry.findtext(f"{ATOM_NS}summary") or "").strip()
                     if title and link:
-                        from urllib.parse import urlparse
                         items.append({
                             "title": title,
                             "source": urlparse(link).netloc or "Atom",
                             "published": pub,
-                            "summary": (summ or "")[:280],
+                            "summary": summ[:280],
                             "url": link,
                         })
             except Exception:
                 continue
 
-    # اگر چیزی نداشتیم، چند آیتم ساختگی بگذاریم که UI خالی نباشه
     if not items:
         now = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-        items = [
-            {
-                "title": "نمونه خبر: به‌روزرسانی داده ناموفق بود",
-                "source": "Demo",
-                "published": now,
-                "summary": "برای تست UI. اتصال شبکه‌ی Runner ممکن است محدود بوده باشد.",
-                "url": "https://example.com/",
-            }
-        ]
+        items = [{
+            "title": "نمونه خبر: دادهٔ RSS در دسترس نبود",
+            "source": "Demo",
+            "published": now,
+            "summary": "برای تست ظاهر سایت. ممکن است دسترسی شبکه‌ی Runner محدود باشد.",
+            "url": "https://example.com/"
+        }]
 
     save_json(os.path.join(DATA_DIR, "news_macro.json"), {"items": items[:20]})
 
-# -------- main
+# ---------------------------- main
 
 def main() -> int:
     try:
@@ -199,8 +200,7 @@ def main() -> int:
         print("DONE (with graceful fallbacks)")
         return 0
     except Exception as e:
-        # حتی اگر باگ غیرمنتظره‌ای رخ دهد، فایل‌های حداقلی بنویس
-        now = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        # اگر باگ غیرمنتظره‌ای رخ دهد، خروجی حداقلی بنویس و باز هم با ۰ خارج شو
         try:
             save_json(os.path.join(DATA_DIR, "fx_latest.json"), {
                 "series": [{"label": "دلار (USD→IRR)", "unit": "IRR",
@@ -210,19 +210,20 @@ def main() -> int:
                 "series": [{"label": "طلا (XAU→USD)", "unit": "USD",
                             "points": fallback_flat_series(7, 2300.0)}]
             })
+            now = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
             save_json(os.path.join(DATA_DIR, "news_macro.json"), {
                 "items": [{
                     "title": "نمونه خبر (fallback)",
                     "source": "Local",
                     "published": now,
-                    "summary": "اجرای اسکریپت با خطا مواجه شد اما خروجی جایگزین نوشته شد.",
+                    "summary": "اجرای اسکریپت با خطا مواجه شد اما فایل‌های جایگزین نوشته شد.",
                     "url": "https://example.com/"
                 }]
             })
         except Exception:
             pass
         print(f"WARNING: {e}")
-        return 0  # هرگز با کد 1 خارج نشویم
+        return 0
 
 if __name__ == "__main__":
     sys.exit(main())
