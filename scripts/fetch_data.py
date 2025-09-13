@@ -1,8 +1,8 @@
 # scripts/fetch_data.py
-# خبرها فقط فارسی + ادغام آرشیو ۶۰روزه + نرخ‌ها (fault-tolerant)
+# خبرها با ترجمهٔ خودکار به فارسی + ادغام آرشیو ۶۰روزه + نرخ‌ها (fault-tolerant)
 
 from __future__ import annotations
-import json, os, sys, re
+import json, os, sys, re, hashlib
 import datetime as dt
 from typing import Any, Dict, List, Optional
 
@@ -13,7 +13,7 @@ except Exception:
     requests = None  # type: ignore
 
 UA_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; MRNews-DataFetcher/1.2; +https://github.com/)",
+    "User-Agent": "Mozilla/5.0 (compatible; MRNews-DataFetcher/1.3; +https://github.com/)",
     "Accept": "application/json, text/xml, application/xml;q=0.9, */*;q=0.8",
 }
 
@@ -24,18 +24,14 @@ os.makedirs(DATA_DIR, exist_ok=True)
 def http_get_json(url: str, timeout: int = 30):
     if not requests: return None
     try:
-        r = requests.get(url, headers=UA_HEADERS, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
+        r = requests.get(url, headers=UA_HEADERS, timeout=timeout); r.raise_for_status(); return r.json()
     except Exception:
         return None
 
 def http_get_bytes(url: str, timeout: int = 25):
     if not requests: return None
     try:
-        r = requests.get(url, headers=UA_HEADERS, timeout=timeout)
-        r.raise_for_status()
-        return r.content
+        r = requests.get(url, headers=UA_HEADERS, timeout=timeout); r.raise_for_status(); return r.content
     except Exception:
         return None
 
@@ -69,8 +65,8 @@ def iso_to_epoch_ms(iso: str) -> int:
     except Exception:
         return int(dt.datetime.utcnow().timestamp()*1000)
 
-# ---------- متن ----------
-PERSIAN_RE = re.compile(r"[\u0600-\u06FF]")  # محدوده فارسی/عربی
+# ---------- متن و تشخیص زبان ----------
+PERSIAN_RE = re.compile(r"[\u0600-\u06FF]")
 TAG_RE = re.compile(r"<[^>]+>")
 
 def is_persian(txt: Optional[str]) -> bool:
@@ -79,7 +75,62 @@ def is_persian(txt: Optional[str]) -> bool:
 def strip_html(s: str) -> str:
     return TAG_RE.sub("", s or "").strip()
 
-# ---------- فایل ----------
+# ---------- ترجمه (LibreTranslate) + کش ----------
+LT_URL = os.environ.get("LT_URL", "https://translate.astian.org")
+LT_API_KEY = os.environ.get("LT_API_KEY", "")
+TRANSLATE_LIMIT = int(os.environ.get("TRANSLATE_LIMIT", "30"))  # حداکثر آیتم قابل ترجمه در هر اجرا
+CACHE_PATH = os.path.join(DATA_DIR, "translate_cache.json")
+
+def _load_cache() -> Dict[str, str]:
+    try:
+        with open(CACHE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_cache(cache: Dict[str, str]) -> None:
+    try:
+        with open(CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _cache_key(text: str) -> str:
+    h = hashlib.sha1(("fa|" + (text or "")).encode("utf-8")).hexdigest()
+    return h
+
+def translate_text(text: str, cache: Dict[str, str]) -> Optional[str]:
+    """متن را با LibreTranslate به فارسی برگردان. در خطا: None."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    key = _cache_key(text)
+    if key in cache:
+        return cache[key]
+    if not requests:
+        return None
+    try:
+        url = LT_URL.rstrip("/") + "/translate"
+        payload = {
+            "q": text[:1800],  # سقف احتیاطی
+            "source": "auto",
+            "target": "fa",
+            "format": "text",
+        }
+        if LT_API_KEY:
+            payload["api_key"] = LT_API_KEY
+        r = requests.post(url, json=payload, headers={"Accept":"application/json"}, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        fa = (data.get("translatedText") or "").strip()
+        if fa:
+            cache[key] = fa
+            return fa
+        return None
+    except Exception:
+        return None
+
+# ---------- فایل مشترک ----------
 def save_json(path: str, obj: Any) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
@@ -93,7 +144,8 @@ def timeseries(base: str, symbol: str, days: int = 30):
     rates = (data or {}).get("rates", {})
     for day, vals in sorted(rates.items()):
         val = (vals or {}).get(symbol)
-        if val is None: continue
+        if val is None: 
+            continue
         out.append({"t": f"{day}T12:00:00Z", "v": round(float(val), 6)})
     return out
 
@@ -121,7 +173,7 @@ def build_gold():
     xau_usd = timeseries("XAU","USD",30) or fallback_flat_series(30, latest("XAU","USD") or 2300.0)
     save_json(os.path.join(DATA_DIR,"gold_latest.json"),{"series":[{"label":"طلا (XAU→USD)","unit":"USD","points":xau_usd}]})
 
-# ---------- News (فقط فارسی + ادغام آرشیو) ----------
+# ---------- News (ترجمه → فارسی + ادغام آرشیو) ----------
 NEWS_PATH = os.path.join(DATA_DIR, "news_macro.json")
 
 def load_existing_news() -> List[Dict[str, Any]]:
@@ -129,32 +181,31 @@ def load_existing_news() -> List[Dict[str, Any]]:
         with open(NEWS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
             items: List[Dict[str, Any]] = data.get("items", [])
-            # پاک‌سازی: فقط فارسی را نگه داریم و timestamp بدهیم
             cleaned: List[Dict[str, Any]] = []
             for it in items:
-                title = it.get("title", "")
-                summ  = it.get("summary", "")
-                if not (is_persian(title) or is_persian(summ)):
-                    continue
+                # نرمال‌سازی زمان
                 iso = to_iso_utc(it.get("published",""))
                 it["published"] = iso
                 it["published_ts"] = it.get("published_ts") or iso_to_epoch_ms(iso)
-                it["summary"] = strip_html(summ)[:280]
-                cleaned.append(it)
+                # پاک‌کردن HTML
+                it["summary"] = strip_html(it.get("summary",""))[:280]
+                # فقط فارسی (یا قبلاً ترجمه‌شده)
+                if is_persian(it.get("title")) or is_persian(it.get("summary","")) or it.get("translated"):
+                    cleaned.append(it)
             return cleaned
     except Exception:
         return []
 
-def fetch_feeds() -> List[Dict[str, Any]]:
-    # منابع: BBC فارسی حتماً؛ بقیه اگر فارسی نباشند توسط فیلتر حذف می‌شوند
+def fetch_feeds_and_translate() -> List[Dict[str, Any]]:
+    # منابع متنوع (برخی انگلیسی‌اند و ترجمه می‌شوند)
     feeds = [
         "https://feeds.bbci.co.uk/persian/rss.xml",          # BBC Persian
-        "https://fa.euronews.com/rss",                       # Euronews Persian (در صورت دردسترس)
-        "https://rss.dw.com/xml/rss-fa-all",                 # DW Persian (در صورت دردسترس)
-        "https://www.radiofarda.com/api/zykq_iet$qqt",       # Radio Farda (ممکن است کار نکند؛ فیلتر دارد)
-        "https://www.reuters.com/world/rss",                 # English → فیلتر می‌شود
-        "https://www.reuters.com/world/middle-east/rss",     # English → فیلتر می‌شود
-        "https://www.aljazeera.com/xml/rss/all.xml",         # English → فیلتر می‌شود
+        "https://fa.euronews.com/rss",                       # Euronews Persian
+        "https://rss.dw.com/xml/rss-fa-all",                 # DW Persian
+        "https://www.radiofarda.com/api/zykq_iet$qqt",       # Radio Farda (ممکن است محدودیت داشته باشد)
+        "https://www.reuters.com/world/rss",                 # EN
+        "https://www.reuters.com/world/middle-east/rss",     # EN
+        "https://www.aljazeera.com/xml/rss/all.xml",         # EN
     ]
     items: List[Dict[str, Any]] = []
     try:
@@ -164,6 +215,26 @@ def fetch_feeds() -> List[Dict[str, Any]]:
         return items
 
     ATOM_NS = "{http://www.w3.org/2005/Atom}"
+    cache = _load_cache()
+    budget = TRANSLATE_LIMIT
+
+    def ensure_fa(title: str, summary: str) -> Optional[Dict[str, str]]:
+        nonlocal budget
+        title = strip_html(title)
+        summary = strip_html(summary)
+        # اگر فارسی است، نیازی به ترجمه نیست
+        if is_persian(title) or is_persian(summary):
+            return {"title": title, "summary": summary, "translated": False}
+        # اگر بودجه ترجمه تمام شده، رها کن
+        if budget <= 0:
+            return None
+        # ترجمه
+        fa_title = translate_text(title, cache)
+        fa_summary = translate_text(summary, cache) if summary else ""
+        if fa_title is None:
+            return None
+        budget -= 1  # به ازای هر آیتم
+        return {"title": fa_title or title, "summary": fa_summary or summary, "translated": True}
 
     for url in feeds:
         try:
@@ -173,53 +244,53 @@ def fetch_feeds() -> List[Dict[str, Any]]:
 
             # RSS
             for it in root.findall(".//item"):
-                title = strip_html(it.findtext("title") or "")
-                link  = (it.findtext("link") or "").strip()
-                pub   = to_iso_utc((it.findtext("pubDate") or "").strip())
-                desc  = strip_html(it.findtext("description") or "")
-                # فقط فارسی
-                if not (is_persian(title) or is_persian(desc)):
-                    continue
-                if title and link:
+                t = it.findtext("title") or ""
+                l = (it.findtext("link") or "").strip()
+                p = to_iso_utc((it.findtext("pubDate") or "").strip())
+                d = it.findtext("description") or ""
+                conv = ensure_fa(t, d)
+                if conv and l:
                     items.append({
-                        "title": title,
-                        "source": urlparse(link).netloc or "RSS",
-                        "published": pub,
-                        "published_ts": iso_to_epoch_ms(pub),
-                        "summary": desc[:280],
-                        "url": link,
+                        "title": conv["title"],
+                        "source": (l.split("/")[2] if "://" in l else "RSS"),
+                        "published": p,
+                        "published_ts": iso_to_epoch_ms(p),
+                        "summary": conv["summary"][:280],
+                        "url": l,
+                        "translated": conv["translated"],
                     })
 
             # Atom
             for en in root.findall(f".//{ATOM_NS}entry"):
-                title = strip_html(en.findtext(f"{ATOM_NS}title") or "")
+                t = en.findtext(f"{ATOM_NS}title") or ""
                 link_el = en.find(f"{ATOM_NS}link")
-                link = (link_el.get("href") if link_el is not None else "").strip()
-                pub = to_iso_utc((en.findtext(f"{ATOM_NS}updated") or en.findtext(f"{ATOM_NS}published") or "").strip())
-                summ = strip_html(en.findtext(f"{ATOM_NS}summary") or "")
-                # فقط فارسی
-                if not (is_persian(title) or is_persian(summ)):
-                    continue
-                if title and link:
+                l = (link_el.get("href") if link_el is not None else "").strip()
+                p = to_iso_utc((en.findtext(f"{ATOM_NS}updated") or en.findtext(f"{ATOM_NS}published") or "").strip())
+                s = en.findtext(f"{ATOM_NS}summary") or ""
+                conv = ensure_fa(t, s)
+                if conv and l:
                     items.append({
-                        "title": title,
-                        "source": urlparse(link).netloc or "Atom",
-                        "published": pub,
-                        "published_ts": iso_to_epoch_ms(pub),
-                        "summary": summ[:280],
-                        "url": link,
+                        "title": conv["title"],
+                        "source": (l.split("/")[2] if "://" in l else "Atom"),
+                        "published": p,
+                        "published_ts": iso_to_epoch_ms(p),
+                        "summary": conv["summary"][:280],
+                        "url": l,
+                        "translated": conv["translated"],
                     })
         except Exception:
             continue
 
+    # ذخیرهٔ کش (اگر چیزی اضافه شد)
+    _save_cache(cache)
     return items
 
 def merge_and_save_news() -> None:
     now_ms = int(dt.datetime.utcnow().timestamp()*1000)
-    cutoff = now_ms - 60*24*3600*1000  # فقط ۶۰ روز اخیر
+    cutoff = now_ms - 60*24*3600*1000  # ۶۰ روز اخیر
 
     existing = load_existing_news()
-    fresh = fetch_feeds()
+    fresh = fetch_feeds_and_translate()
 
     # ادغام بر اساس URL
     by_url: Dict[str, Dict[str, Any]] = {}
@@ -245,15 +316,13 @@ def merge_and_save_news() -> None:
     merged = merged[:400]
 
     save_json(os.path.join(DATA_DIR, "news_macro.json"), {"items": merged})
-    print(f"NEWS(FA): existing={len(existing)} fetched={len(fresh)} merged={len(merged)} added_now={added}")
+    print(f"NEWS(FA+translate): existing={len(existing)} fetched={len(fresh)} merged={len(merged)} added_now={added}")
 
 # ---------- main ----------
 def main() -> int:
     try:
-        # نرخ‌ها
         build_fx()
         build_gold()
-        # خبرها (فقط فارسی)
         merge_and_save_news()
         print("DONE")
         return 0
@@ -269,7 +338,7 @@ def main() -> int:
             now_iso = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
             save_json(os.path.join(DATA_DIR,"news_macro.json"),{"items":[{
                 "title":"نمونه خبر (fallback)","source":"Local","published":now_iso,
-                "published_ts":iso_to_epoch_ms(now_iso),"summary":"اتصال به فیدها برقرار نشد.","url":"https://example.com/"
+                "published_ts":iso_to_epoch_ms(now_iso),"summary":"اتصال به فیدها/ترجمه برقرار نشد.","url":"https://example.com/"
             }]})
         except Exception:
             pass
