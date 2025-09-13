@@ -1,4 +1,4 @@
-// —— کمکی‌ها
+// —— ابزارهای عمومی
 const $ = s => document.querySelector(s);
 const NF = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 2 });
 const NFcompact = new Intl.NumberFormat("fa-IR", { notation: "compact", maximumFractionDigits: 1 });
@@ -8,13 +8,13 @@ const hsl = (i, a=0.8) => `hsl(${(i*67)%360} 80% ${a*50}%)`;
 // حالت اخبار (برای صفحه‌بندی)
 const NEWS_STATE = { all: [], filtered: [], page: 1, pageSize: 10 };
 
-// خواندن JSON
+// --- کمک‌تابع‌های شبکه/داده
 async function fetchJSON(path){
   try{ const r = await fetch(path, {cache: "no-store"}); if(!r.ok) return null; return await r.json(); }
   catch{ return null; }
 }
 
-// دمو سری
+// دمو سری برای مواقع بدون فایل
 function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-24*3600e3), n=48, base=50){
   return labels.map((lab, i) => {
     const pts = []; let v = base + i*2;
@@ -23,7 +23,7 @@ function demoSeries(labels=["USD","EUR"], start=new Date(Date.now()-24*3600e3), 
   });
 }
 
-// تبدیل به ریال
+// تبدیل به ریال بر اساس واحد سری
 function toRialByUnit(value, seriesUnit, rates){
   if (seriesUnit === "IRR") return value;
   if (seriesUnit === "USD") return value * (rates?.USD || 0);
@@ -31,7 +31,7 @@ function toRialByUnit(value, seriesUnit, rates){
   return value;
 }
 
-// بوم
+// اندازه‌دهی بوم
 function fitCanvas(cnv){
   const rect = cnv.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
@@ -42,7 +42,7 @@ function fitCanvas(cnv){
   return ctx;
 }
 
-// چارت
+// رسم چارت خطی
 function drawLineChart(canvasId, series, legendId, unit){
   const cnv = document.getElementById(canvasId);
   const ctx = fitCanvas(cnv);
@@ -62,19 +62,19 @@ function drawLineChart(canvasId, series, legendId, unit){
   const x = t => P.l + ((t - tMin) / (tMax - tMin || 1)) * (W - P.l - P.r);
   const y = v => H - P.b - ((v - yMin) / (yMax - yMin || 1)) * (H - P.t - P.b);
 
-  // grid
+  // شبکه
   ctx.strokeStyle = "#273244"; ctx.lineWidth = 1;
   ctx.beginPath();
   const ticks = 4;
   for(let i=0;i<=ticks;i++){ const gy = P.t + i*(H-P.t-P.b)/ticks; ctx.moveTo(P.l, gy); ctx.lineTo(W-P.r, gy); }
   ctx.stroke();
 
-  // X
+  // محور X
   ctx.fillStyle = "#cbd5e1"; ctx.font = "12px system-ui"; ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";  ctx.fillText(new Date(tMin).toLocaleTimeString("fa-IR"), P.l, H-8);
   ctx.textAlign = "right"; ctx.fillText(new Date(tMax).toLocaleTimeString("fa-IR"), W - P.r, H-8);
 
-  // Y
+  // محور Y
   ctx.textAlign = "right";
   for(let i=0;i<=ticks;i++){
     const val = yMax - (i*(yMax-yMin)/ticks);
@@ -83,7 +83,7 @@ function drawLineChart(canvasId, series, legendId, unit){
     ctx.fillText(txt, P.l - 8, yy + 4);
   }
 
-  // series
+  // سری‌ها
   const leg = document.getElementById(legendId);
   if(leg){ leg.innerHTML = ""; }
   series.forEach((s, i) => {
@@ -101,6 +101,35 @@ function drawLineChart(canvasId, series, legendId, unit){
   if(leg){ const unitPill = document.createElement("span"); unitPill.className = "pill"; unitPill.innerHTML = unit==="rial" ? "واحد: ریال" : "واحد: اصلی"; leg.appendChild(unitPill); }
 }
 
+// --- اخبار: نرمال‌سازی، فیلتر، مرتب‌سازی، صفحه‌بندی
+
+// تبدیل ایمن رشته‌های تاریخ خبر به timestamp عددی (ms)
+function newsTimestamp(item){
+  // اگر بک‌اند published_ts داده باشد
+  if (typeof item?.published_ts === "number" && !isNaN(item.published_ts)) return item.published_ts;
+
+  let s = (item?.published || "").trim();
+  if (!s) return NaN;
+
+  // تلاش ۱: Date.parse مستقیم
+  let t = Date.parse(s);
+  if (!isNaN(t)) return t;
+
+  // تلاش ۲: جایگزینی GMT→UTC (برخی پارسرها)
+  t = Date.parse(s.replace("GMT", "UTC"));
+  if (!isNaN(t)) return t;
+
+  // تلاش ۳: اگر ISO ناقص بود، Z اضافه کنیم
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(s)) {
+    t = Date.parse(s + "Z");
+    if (!isNaN(t)) return t;
+  }
+
+  // آخرین تلاش: new Date(s).getTime()
+  t = new Date(s).getTime();
+  return isNaN(t) ? NaN : t;
+}
+
 // برش بازهٔ زمانی سری‌ها
 function sliceByRange(series, range){
   const now = Date.now();
@@ -109,24 +138,22 @@ function sliceByRange(series, range){
   return series.map(s => ({ label: s.label, unit: s.unit, points: s.points.filter(p => +new Date(p.t) >= from) }));
 }
 
-// فیلتر و مرتب‌سازی اخبار بر اساس بازه
+// فیلتر و مرتب‌سازی اخبار
 function filterAndSortNews(items, range){
   const now = Date.now();
   const win = range==="1D" ? 1 : range==="1W" ? 7 : 30; // روز
   const from = now - win * 24*3600*1000;
-  return (items || [])
-    .filter(it => {
-      const ts = (typeof it.published_ts === "number") ? it.published_ts : Date.parse(it.published);
-      return !isNaN(ts) && ts >= from;
-    })
-    .sort((a,b) => {
-      const tb = (typeof b.published_ts === "number") ? b.published_ts : Date.parse(b.published);
-      const ta = (typeof a.published_ts === "number") ? a.published_ts : Date.parse(a.published);
-      return tb - ta;
-    });
+
+  const normalized = (items || [])
+    .map(it => ({ ...it, _ts: newsTimestamp(it) }))
+    .filter(it => !isNaN(it._ts)); // فقط آیتم‌های دارای تاریخ معتبر
+
+  return normalized
+    .filter(it => it._ts >= from)
+    .sort((a,b) => b._ts - a._ts);
 }
 
-// رندر لیست خبرها
+// رندر اخبار یک صفحه
 function renderNews(items){
   const box = $("#news-list");
   if(!items.length){
@@ -159,12 +186,8 @@ function renderPager(){
     </div>
   `;
 
-  $("#prevPage")?.addEventListener("click", () => {
-    if(NEWS_STATE.page>1){ NEWS_STATE.page--; renderNewsPage(); }
-  });
-  $("#nextPage")?.addEventListener("click", () => {
-    if(NEWS_STATE.page<pages){ NEWS_STATE.page++; renderNewsPage(); }
-  });
+  $("#prevPage")?.addEventListener("click", () => { if(NEWS_STATE.page>1){ NEWS_STATE.page--; renderNewsPage(); } });
+  $("#nextPage")?.addEventListener("click", () => { const pages = Math.max(1, Math.ceil(total / NEWS_STATE.pageSize)); if(NEWS_STATE.page<pages){ NEWS_STATE.page++; renderNewsPage(); } });
 }
 
 function renderNewsPage(){
@@ -182,7 +205,7 @@ function renderNewsPage(){
   ["اقتصاد کلان","سیاست","انرژی","فناوری","اروپا","آمریکا"].forEach(c => ($("#category")).appendChild(new Option(c,c)));
 
   // رویدادها
-  $("#refresh").addEventListener("click", loadAndRender);
+  $("#refresh").addEventListener("click", () => { NEWS_STATE.page = 1; loadAndRender(); });
   $("#range").addEventListener("change", () => { NEWS_STATE.page = 1; loadAndRender(); });
   $("#unit").addEventListener("change", loadAndRender);
 
@@ -210,22 +233,15 @@ function renderNewsPage(){
     goldSeries = sliceByRange(goldSeries, range);
 
     if(unit === "rial"){
-      fxSeries = fxSeries.map(s => ({
-        label: s.label, unit: "IRR",
-        points: s.points.map(p => ({ t:p.t, v: toRialByUnit(p.v, s.unit || "IRR", rates) }))
-      }));
-      goldSeries = goldSeries.map(s => ({
-        label: s.label, unit: "IRR",
-        points: s.points.map(p => ({ t:p.t, v: toRialByUnit(p.v, s.unit || "USD", rates) }))
-      }));
+      fxSeries = fxSeries.map(s => ({ label: s.label, unit: "IRR", points: s.points.map(p => ({ t:p.t, v: toRialByUnit(p.v, s.unit || "IRR", rates) })) }));
+      goldSeries = goldSeries.map(s => ({ label: s.label, unit: "IRR", points: s.points.map(p => ({ t:p.t, v: toRialByUnit(p.v, s.unit || "USD", rates) })) }));
     }
 
     drawLineChart("chart-fx", fxSeries, "legend-fx", unit);
     drawLineChart("chart-gold", goldSeries, "legend-gold", unit);
 
-    // اخبار: فیلتر + مرتب‌سازی + صفحه‌بندی
-    const itemsAll = (news && news.items) ? news.items : [];
-    NEWS_STATE.all = itemsAll;
+    // اخبار: نرمال‌سازی + فیلتر + مرتب‌سازی + صفحه‌بندی
+    NEWS_STATE.all = (news && news.items) ? news.items : [];
     NEWS_STATE.filtered = filterAndSortNews(NEWS_STATE.all, range);
     renderNewsPage();
   }
