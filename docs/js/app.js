@@ -217,4 +217,4 @@ function renderNewsPage(){
     NEWS_STATE.filtered = filterAndSortNews(NEWS_STATE.all, range);
     renderNewsPage();
   }
-})();
+})(); 
