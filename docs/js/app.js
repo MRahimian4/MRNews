@@ -1,7 +1,7 @@
 // —— ابزارهای عمومی
 const $ = s => document.querySelector(s);
-const NF = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 2 });
-const NFcompact = new Intl.NumberFormat("fa-IR", { notation: "compact", maximumFractionDigits: 1 });
+const NF = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 2 }); // نمایش کامل
+const NFcompact = new Intl.NumberFormat("fa-IR", { notation: "compact", maximumFractionDigits: 1 }); // نمایش فشرده
 const fmtDate = iso => { try { return new Date(iso).toLocaleDateString("fa-IR"); } catch { return iso; } };
 const fmtDateTime = iso => { try { return new Date(iso).toLocaleString("fa-IR"); } catch { return iso; } };
 const hsl = (i, a=0.9) => `hsl(${(i*67)%360} 80% ${a*50}%)`;
@@ -10,7 +10,7 @@ const hsl = (i, a=0.9) => `hsl(${(i*67)%360} 80% ${a*50}%)`;
 const NEWS_STATE = { all: [], filtered: [], page: 1, pageSize: 10 };
 
 // Tooltip state per-chart
-const ChartStates = {}; // id -> { series, geom, x, y, P, W, H, tMin, tMax, yMin, yMax }
+const ChartStates = {}; // id -> { series, P,W,H, tMin,tMax, yMin,yMax, x(), y() }
 
 // --- کمک‌تابع‌های شبکه/داده
 async function fetchJSON(path){
@@ -40,12 +40,13 @@ function fitCanvas(cnv){
 
 function get5DayTicks(tMin, tMax){
   const MS_DAY = 24*3600*1000;
-  const start = new Date(tMin);
-  start.setHours(0,0,0,0);
-  // به اولین مضرب 5 روز برسیم
-  const offset = ((start.getTime() - tMin) % (5*MS_DAY) + 5*MS_DAY) % (5*MS_DAY);
-  let t = start.getTime() + (offset || 0);
+  // گردکردن به ابتدای روز
+  const startDay = new Date(tMin); startDay.setHours(0,0,0,0);
+  // شروع را خود tMin روز-محور می‌گذاریم و هر ۵ روز جلو می‌رویم
   const ticks = [];
+  let t = startDay.getTime();
+  // عقب نرویم؛ اگر کمتر از tMin شد، به جلو یک ۵روزه برو
+  while (t < tMin) t += 5*MS_DAY;
   for(; t <= tMax + MS_DAY; t += 5*MS_DAY){
     ticks.push(t);
   }
@@ -77,11 +78,11 @@ function drawLabel(ctx, text, x, y, align="left"){
 }
 
 // Base render (شبکه، خطوط، برچسب‌های ۵روزه، آخرین مقدار)
-function renderBaseChart(canvasId, series, unitLabel=""){
+function renderBaseChart(canvasId, series){
   const cnv = document.getElementById(canvasId);
   const ctx = fitCanvas(cnv);
   const W = cnv.clientWidth, H = cnv.clientHeight;
-  const P = { l: 64, r: 16, t: 16, b: 40 }; // کمی پایین بیشتر برای برچسب تاریخ
+  const P = { l: 64, r: 16, t: 16, b: 40 }; // فضای پایین برای تاریخ
 
   const pts = series.flatMap(s => s.points.map(p => ({ t:+new Date(p.t), v:+p.v })));
   if(!pts.length){ ctx.fillStyle="#94a3b8"; ctx.fillText("داده‌ای موجود نیست", 12, 20); return; }
@@ -103,7 +104,7 @@ function renderBaseChart(canvasId, series, unitLabel=""){
   for(let i=0;i<=ticksY;i++){ const gy = P.t + i*(H-P.t-P.b)/ticksY; ctx.moveTo(P.l, gy); ctx.lineTo(W-P.r, gy); }
   ctx.stroke();
 
-  // Y labels (فقط اعداد؛ عنوان محور حذف شد تا تداخلی نداشته باشد)
+  // Y labels (فقط اعداد؛ عنوان محور در لِجند/تیتر آمده تا تداخل نداشته باشد)
   ctx.fillStyle = "#cbd5e1"; ctx.font = "12px system-ui"; ctx.textBaseline = "middle"; ctx.textAlign = "right";
   for(let i=0;i<=ticksY;i++){
     const val = yMax - (i*(yMax-yMin)/ticksY);
@@ -147,13 +148,12 @@ function renderBaseChart(canvasId, series, unitLabel=""){
     ctx.stroke();
   });
 
-  // مقادیر هر ۵ روز: نزدیک‌ترین نقطه هر سری
+  // مقادیر هر ۵ روز: نزدیک‌ترین نقطه هر سری (در محدوده ~48h)
   ctx.font = "12px system-ui";
   series.forEach((s, i) => {
     const col = hsl(i,.9);
     const arr = s.points.slice().sort((a,b)=>+new Date(a.t)-+new Date(b.t));
     ticks5.forEach(tk => {
-      // نزدیک‌ترین نقطه (در محدودهٔ ~ 48 ساعت)
       let nearest = null, dmin = Infinity;
       arr.forEach(p => {
         const d = Math.abs(+new Date(p.t) - tk);
@@ -161,24 +161,21 @@ function renderBaseChart(canvasId, series, unitLabel=""){
       });
       if(nearest && dmin <= 48*3600*1000){
         const X = x(+new Date(nearest.t)), Y = y(+nearest.v);
-        // نقطهٔ کوچک
+        // نقطهٔ کوچک + برچسب مقدار فشرده
         ctx.fillStyle = col;
         ctx.beginPath(); ctx.arc(X, Y, 2.5, 0, Math.PI*2); ctx.fill();
-        // برچسب مقدار (compact)
         drawLabel(ctx, NFcompact.format(nearest.v), X + 6, Y - 14, "left");
       }
     });
   });
 
-  // آخرین مقدار هر سری
+  // آخرین مقدار هر سری (لیبل با عدد کامل/فشرده؟—اینجا فشرده برای خوانایی)
   series.forEach((s, i) => {
     const col = hsl(i,.9);
     const last = s.points.slice().sort((a,b)=>+new Date(a.t)-+new Date(b.t)).at(-1);
     if(!last) return;
     const X = x(+new Date(last.t)), Y = y(+last.v);
-    // دایرهٔ آخرین نقطه
     ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X, Y, 3, 0, Math.PI*2); ctx.fill();
-    // برچسب عدد آخر (راست‌چین کنار نقطه تا بیرون نزنه)
     drawLabel(ctx, NFcompact.format(last.v), Math.min(X+8, W-P.r-4), Y, "left");
   });
 
@@ -208,9 +205,8 @@ function attachHover(canvasId){
 
   cnv.addEventListener("mouseleave", () => {
     tip.style.display = "none";
-    // بازنقاشی بدون لایهٔ راهنما
     const st = ChartStates[canvasId];
-    if(st) renderBaseChart(canvasId, st.series, "ریال");
+    if(st) renderBaseChart(canvasId, st.series);
   });
 
   cnv.addEventListener("mousemove", (e) => {
@@ -224,7 +220,7 @@ function attachHover(canvasId){
     // بیرون از ناحیه رسم؟
     if(px < P.l || px > W-P.r || py < P.t || py > H-P.b){
       tip.style.display = "none";
-      renderBaseChart(canvasId, st.series, "ریال");
+      renderBaseChart(canvasId, st.series);
       return;
     }
 
@@ -242,13 +238,13 @@ function attachHover(canvasId){
         if(d < dmin){ dmin = d; nearest = p; }
       });
       if(nearest){
-        rows.push({ label: s.label, color: hsl(i,.9), value: nearest.v });
+        rows.push({ label: s.label, color: hsl(i,.9), value: nearest.v, at: nearest.t });
         markers.push({ x: x(+new Date(nearest.t)), y: y(nearest.v), color: hsl(i,.9) });
       }
     });
 
     // بازکِشی پایه + لایهٔ راهنما
-    renderBaseChart(canvasId, st.series, "ریال");
+    renderBaseChart(canvasId, st.series);
     const ctx = cnv.getContext("2d");
     // خط عمودی
     ctx.save();
@@ -263,10 +259,10 @@ function attachHover(canvasId){
       ctx.strokeStyle = "#0b0f14"; ctx.lineWidth = 1; ctx.stroke();
     });
 
-    // Tooltip HTML
+    // Tooltip HTML (عدد کامل)
     const html = [
       `<div class="row" style="margin-bottom:4px"><strong>${fmtDateTime(new Date(tHover).toISOString())}</strong></div>`,
-      ...rows.map(r => `<div class="row"><span><span class="dot" style="background:${r.color}"></span> ${r.label}</span><span class="val">${NFcompact.format(r.value)}</span></div>`)
+      ...rows.map(r => `<div class="row"><span><span class="dot" style="background:${r.color}"></span> ${r.label}</span><span class="val">${NF.format(r.value)}</span></div>`)
     ].join("");
     tip.innerHTML = html;
     tip.style.display = "block";
@@ -312,7 +308,7 @@ function multiplyGoldByUsdIrr(goldUSD, usdIRR){
   for(let i=0; i<a.length; i++){
     const tA = +new Date(a[i].t);
     while(j+1 < b.length && +new Date(b[j+1].t) <= tA){ j++; lastRate = b[j].v; }
-    out.push({ t: a[i].t, v: a[i].v * (lastRate || 0) });
+    out.push({ t: a[i].t, v: parseFloat(a[i].v) * parseFloat(lastRate) });
   }
   return out;
 }
@@ -399,43 +395,40 @@ function renderNewsPage(){
     if(clearLegend){ ["legend-fx","legend-gold"].forEach(id => { const e=$("#"+id); if(e){e.innerHTML="";} }); }
 
     const [fx, gold, news, rates] = await Promise.all([
-      fetchJSON("./data/fx_latest.json"),      // USD→IRR و EUR→IRR (۳۰ روزه)
-      fetchJSON("./data/gold_latest.json"),    // XAU→USD (۳۰ روزه)
+      fetchJSON("./data/fx_latest.json"),      // USD/EUR→IRR (آزاد، ۳۰ روزه)
+      fetchJSON("./data/gold_latest.json"),    // XAU→IRR (محاسبه‌شده با USD آزاد)
       fetchJSON("./data/news_macro.json"),
-      fetchJSON("./data/rates.json")           // timestamp و منبع
+      fetchJSON("./data/rates.json")           // شامل source و timestamp
     ]);
 
-    // --- سری‌های FX
-    let fxSeries = (fx && fx.series) ? fx.series : demoSeries(["دلار (USD→IRR)","یورو (EUR→IRR)"]);
+    // --- سری‌های FX (آزاد)
+    let fxSeries = (fx && fx.series) ? fx.series : demoSeries(["دلار (USD→IRR، بازار آزاد)","یورو (EUR→IRR، بازار آزاد)"]);
     fxSeries = fxSeries.map(s => {
       const pts = s.points.sort((a,b)=>+new Date(a.t)-+new Date(b.t)).slice(-30);
       return { label: s.label, unit: "IRR", points: pts };
     });
 
-    // --- سری طلا به ریال (XAU→IRR) با ضرب روزانه در USD→IRR
-    const goldUSD = (gold && gold.series && gold.series[0]) ? gold.series[0] : demoSeries(["XAU→USD"], new Date(Date.now()-29*24*3600e3), 30, 2300)[0];
-    const usdIRR  = fxSeries.find(s => /USD/i.test(s.label)) || fxSeries[0];
-    const goldIRRpoints = multiplyGoldByUsdIrr(goldUSD.points, usdIRR.points);
-    const goldIRRseries = [{ label: "طلا (XAU→IRR)", unit: "IRR", points: goldIRRpoints }];
+    // --- سری طلا (XAU→IRR بر پایهٔ USD آزاد)
+    let goldSeries = (gold && gold.series) ? gold.series : [{ label:"طلا (XAU→IRR، بر اساس USD آزاد)", unit:"IRR", points: demoSeries(["XAU→IRR"], new Date(Date.now()-29*24*3600e3), 30, 150000000)[0].points }];
 
     // ———— رسم نمودارها + Hover
-    renderBaseChart("chart-gold", goldIRRseries, "ریال");
+    renderBaseChart("chart-gold", goldSeries);
     attachHover("chart-gold");
     renderLegend("legend-gold", {
-      title: "قیمت هر اونس طلا به ریال — روند ۳۰ روزه",
-      series: goldIRRseries,
-      updatedIso: lastISO(goldIRRseries),
-      source: "exchangerate.host × open.er-api (تبدیل USD→IRR)",
-      note: "محاسبهٔ روزانه: (XAU→USD) × (USD→IRR)"
+      title: "قیمت هر اونس طلا به ریال — روند ۳۰ روزه (بر اساس USD آزاد)",
+      series: goldSeries,
+      updatedIso: lastISO(goldSeries),
+      source: (rates && rates.source) ? rates.source : "منبع آزاد/تلفیقی",
+      note: "محاسبهٔ روزانه: (XAU→USD) × (USD→IRR «آزاد»)"
     });
 
-    renderBaseChart("chart-fx", fxSeries, "ریال");
+    renderBaseChart("chart-fx", fxSeries);
     attachHover("chart-fx");
     renderLegend("legend-fx", {
-      title: "نرخ ارز به ریال — دلار و یورو — روند ۳۰ روزه",
+      title: "نرخ ارز آزاد به ریال — دلار و یورو — روند ۳۰ روزه",
       series: fxSeries,
       updatedIso: (rates && rates.timestamp) ? rates.timestamp : lastISO(fxSeries),
-      source: (rates && rates.source) ? rates.source : "exchangerate.host"
+      source: (rates && rates.source) ? rates.source : "منبع آزاد"
     });
 
     // --- اخبار (۳۰ روز گذشته)
