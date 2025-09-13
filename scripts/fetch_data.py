@@ -1,6 +1,6 @@
 # scripts/fetch_data.py
-# جمع‌آوری روزانه نرخ‌ها (USD→IRR, EUR→IRR, XAU→USD) + چند خبر RSS
-# خروجی‌ها: docs/data/fx_latest.json , docs/data/gold_latest.json , docs/data/news_macro.json
+# جمع‌آوری نرخ‌ها (USD→IRR, EUR→IRR, XAU→USD) + خبرها از چند RSS
+# خروجی‌ها در: docs/data/fx_latest.json , docs/data/gold_latest.json , docs/data/news_macro.json
 
 import json, os, datetime as dt, requests
 
@@ -28,7 +28,7 @@ def timeseries(base, symbol, days=30):
         val = vals.get(symbol)
         if val is None:
             continue
-        # زمان وسط‌روز را می‌گذاریم تا در نمودار مرتب باشد
+        # زمان وسط‌روز برای مرتب بودن نمودار
         points.append({"t": f"{day}T12:00:00Z", "v": round(float(val), 6)})
     return points
 
@@ -37,12 +37,10 @@ def latest(base, symbol):
     r = requests.get(url, timeout=30)
     r.raise_for_status()
     val = r.json().get("rates", {}).get(symbol)
-    if val is None:
-        return None
-    return round(float(val), 6)
+    return round(float(val), 6) if val is not None else None
 
 def build_fx():
-    # USD→IRR و EUR→IRR (روزانه ۳۰ روز اخیر)
+    # نرخ‌های مصرف‌شونده مستقیم به ریال (IRR)
     usd_irr = timeseries("USD", "IRR", days=30)
     eur_irr = timeseries("EUR", "IRR", days=30)
     out = {
@@ -54,7 +52,7 @@ def build_fx():
     save_json(os.path.join(DATA_DIR, "fx_latest.json"), out)
 
 def build_gold():
-    # طلا: XAU→USD (۳۰ روز اخیر). اگر تایم‌سریز در دسترس نبود، آخرین مقدار را می‌گیریم.
+    # طلا: XAU→USD (۳۰ روز اخیر) — اگر نشد، آخرین مقدار
     try:
         xau_usd = timeseries("XAU", "USD", days=30)
         if not xau_usd:
@@ -66,7 +64,7 @@ def build_gold():
     save_json(os.path.join(DATA_DIR, "gold_latest.json"), out)
 
 def build_news():
-    # چند خبر ساده از RSS (بدون کلید). لازم نیست دقیق باشد؛ صرفاً برای MVP.
+    # RSS ساده برای MVP
     feeds = [
         "https://feeds.bbci.co.uk/persian/rss.xml",
         "https://www.reuters.com/world/rss",
@@ -80,7 +78,7 @@ def build_news():
             res = requests.get(url, timeout=20)
             res.raise_for_status()
             root = ET.fromstring(res.content)
-            # تلاش برای خواندن فرمت‌های رایج RSS/Atom
+            # RSS
             for item in root.findall(".//item"):
                 title = item.findtext("title") or ""
                 link = item.findtext("link") or ""
@@ -99,24 +97,4 @@ def build_news():
                 title = (entry.findtext("{http://www.w3.org/2005/Atom}title") or "").strip()
                 link_el = entry.find("{http://www.w3.org/2005/Atom}link")
                 link = (link_el.get("href") if link_el is not None else "") or ""
-                pub = entry.findtext("{http://www.w3.org/2005/Atom}updated") or ""
-                summ = entry.findtext("{http://www.w3.org/2005/Atom}summary") or ""
-                if title and link:
-                    items.append({
-                        "title": title,
-                        "source": urllib.parse.urlparse(link).netloc or "Atom",
-                        "published": pub,
-                        "summary": summ[:280],
-                        "url": link,
-                    })
-        except Exception:
-            continue
-
-    items = items[:20]  # مختصر
-    save_json(os.path.join(DATA_DIR, "news_macro.json"), {"items": items})
-
-if __name__ == "__main__":
-    build_fx()
-    build_gold()
-    build_news()
-    print("DONE")
+                pub = entry.findtext("{http://www.w3
