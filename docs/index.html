@@ -1,66 +1,63 @@
 <!doctype html>
 <html lang="fa" dir="rtl">
-  <head>
-    <meta charset="utf-8" />
-    <title>اخبار و نرخ‌ها</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="./css/style.css" />
-  </head>
-  <body>
-    <div class="container">
-      <div class="header">
-        <div class="brand">
-          <span class="dot"></span>
-          <h1>اخبار و نرخ‌ها</h1>
-        </div>
-        <div class="toolbar">
-          <label>
-            <span class="badge">حالت</span>
-            <select id="mode" class="select"></select>
-          </label>
-          <label>
-            <span class="badge">دسته‌بندی</span>
-            <select id="category" class="select"></select>
-          </label>
-          <label>
-            <span class="badge">بازه زمانی</span>
-            <select id="range" class="select">
-              <option value="1D">۱ روز</option>
-              <option value="1W" selected>۱ هفته</option>
-              <option value="1M">۱ ماه</option>
-            </select>
-          </label>
-          <label>
-            <span class="badge">واحد</span>
-            <select id="unit" class="select">
-              <option value="original" selected>واحد اصلی</option>
-              <option value="rial">ریال</option>
-            </select>
-          </label>
-          <button id="refresh" class="btn">بروزرسانی</button>
-        </div>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MRNews — اخبار و روند ۳۰ روزهٔ طلا و ارز به ریال</title>
+  <meta name="color-scheme" content="dark">
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="brand">
+        <span class="dot"></span>
+        <h1>MRNews</h1>
       </div>
-
-      <div class="grid">
-        <div class="card">
-          <h3>دلار و یورو</h3>
-          <canvas id="chart-fx" class="chart"></canvas>
-          <div id="legend-fx" class="legend"></div>
-        </div>
-        <div class="card">
-          <h3>طلا</h3>
-          <canvas id="chart-gold" class="chart"></canvas>
-          <div id="legend-gold" class="legend"></div>
-        </div>
+      <div class="toolbar">
+        <select id="unit" class="select" disabled title="واحد نمایش (قفل روی ریال)">
+          <option value="rial" selected>ریال</option>
+        </select>
+        <select id="range" class="select" disabled title="بازهٔ زمانی (قفل روی ۳۰ روز)">
+          <option value="1D">۱ روز</option>
+          <option value="1W">۱ هفته</option>
+          <option value="1M" selected>۳۰ روز</option>
+        </select>
+        <button id="refresh" class="btn">به‌روزرسانی نمایش</button>
       </div>
+    </header>
 
-      <div class="section-title">آخرین اخبار</div>
-      <div id="news-list" class="list"></div>
-      <div id="news-pager" class="pager"></div>
+    <main class="grid">
+      <!-- ستون چپ: نمودارها -->
+      <section>
+        <div class="card">
+          <h3>قیمت هر اونس طلا به ریال — روند ۳۰ روزه</h3>
+          <canvas id="chart-gold" class="chart" aria-label="نمودار طلا به ریال"></canvas>
+          <div id="legend-gold" class="legend" aria-live="polite"></div>
+        </div>
 
-      <div class="footer">نسخه نمایشی • GitHub Pages • داده‌های واقعی/آزمایشی</div>
-    </div>
+        <div class="card" style="margin-top:14px;">
+          <h3>نرخ ارز به ریال — دلار و یورو — روند ۳۰ روزه</h3>
+          <canvas id="chart-fx" class="chart" aria-label="نمودار دلار و یورو به ریال"></canvas>
+          <div id="legend-fx" class="legend" aria-live="polite"></div>
+        </div>
+      </section>
 
-    <script src="./js/app.js"></script>
-  </body>
+      <!-- ستون راست: اخبار -->
+      <aside>
+        <div class="card">
+          <h3>آخرین خبرها (۳۰ روز گذشته)</h3>
+          <div id="news-list" class="list"></div>
+          <div id="news-pager" class="pager"></div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      ساخته‌شده برای نمایش خبری و روندهای قیمتی؛ داده‌های نرخ از <span class="badge">exchangerate.host</span> و <span class="badge">open.er-api</span> (و در صورت تنظیم کلید: سرویس‌های طلا).
+    </footer>
+  </div>
+
+  <script defer src="./js/app.js"></script>
+</body>
 </html>
