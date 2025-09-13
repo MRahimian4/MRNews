@@ -3,7 +3,7 @@ name: Fetch real data and publish JSON
 on:
   schedule:
     - cron: "0 */3 * * *"   # هر 3 ساعت (UTC)
-  workflow_dispatch: {}      # اجرای دستی از تب Actions
+  workflow_dispatch: {}      # اجرای دستی
 
 permissions:
   contents: write
