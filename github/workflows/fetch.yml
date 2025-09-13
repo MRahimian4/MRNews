@@ -1,9 +1,13 @@
 name: Fetch real data and publish JSON
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 */3 * * *"   # هر 3 ساعت (UTC)
-  workflow_dispatch: {}      # اجرای دستی
+    - cron: "5 * * * *"  # هر ساعت در دقیقه ۵
+  push:
+    paths:
+      - "scripts/**"
+      - ".github/workflows/fetch_data.yml"
 
 permissions:
   contents: write
@@ -15,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -25,11 +29,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run fetch script
-        run: python scripts/fetch_data.py
+      - name: Run fetcher
+        env:
+          LT_URL: ${{ secrets.LT_URL }}
+          LT_API_KEY: ${{ secrets.LT_API_KEY }}
+          METALS_PROVIDER: ${{ secrets.METALS_PROVIDER }}
+          METALS_API_KEY: ${{ secrets.METALS_API_KEY }}
+          IMAGE_FETCH_LIMIT: "12"
+          TRANSLATE_LIMIT: "30"
+        run: |
+          python scripts/fetch_data.py
 
-      - name: Commit data files
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore(data): update fx/gold/news JSON"
-          file_pattern: docs/data/*.json
+      - name: Commit & Push data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/*.json
+          git commit -m "data: auto-update rates/news $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "no changes"
+          git push
