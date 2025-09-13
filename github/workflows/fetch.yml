@@ -3,21 +3,27 @@ name: Fetch real data and publish JSON
 on:
   workflow_dispatch:
   schedule:
-    - cron: "5 * * * *"  # هر ساعت در دقیقه ۵
+    - cron: "5 * * * *"   # هر ساعت در دقیقه ۵ (UTC) — اگر می‌خواهی هر 3 ساعت باشد: "0 */3 * * *"
   push:
     paths:
       - "scripts/**"
-      - ".github/workflows/fetch_data.yml"
+      - ".github/workflows/fetch.yml"
 
 permissions:
   contents: write
+
+concurrency:
+  group: fetch-data
+  cancel-in-progress: true
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (full history)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # برای rebase لازم است
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,21 +35,44 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run fetcher
+      - name: Run fetch script
         env:
+          # اختیاری (برای ترجمه):
           LT_URL: ${{ secrets.LT_URL }}
           LT_API_KEY: ${{ secrets.LT_API_KEY }}
-          METALS_PROVIDER: ${{ secrets.METALS_PROVIDER }}
+          # اختیاری (برای دقت بالاتر قیمت طلا):
+          METALS_PROVIDER: ${{ secrets.METALS_PROVIDER }}   # metalpriceapi | metalsapi | goldapi
           METALS_API_KEY: ${{ secrets.METALS_API_KEY }}
+          # محدودیت‌ها (دلخواه):
           IMAGE_FETCH_LIMIT: "12"
           TRANSLATE_LIMIT: "30"
-        run: |
-          python scripts/fetch_data.py
+        run: python scripts/fetch_data.py
 
-      - name: Commit & Push data
+      - name: Commit & Push data (with rebase)
         run: |
+          set -e
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/data/*.json
-          git commit -m "data: auto-update rates/news $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "no changes"
-          git push
+
+          git add docs/data/*.json || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "data: auto-update rates/news $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          # شاخهٔ فعلی (main یا هرچی) از متغیر محیطی
+          BRANCH="${{ github.ref_name }}"
+
+          # ادغام تغییرات جدید ریموت، بدون Merge commit
+          git pull --rebase --autostash origin "$BRANCH" || true
+
+          # تلاش برای Push معمولی
+          if git push origin HEAD:"$BRANCH"; then
+            echo "Pushed successfully."
+          else
+            echo "Normal push rejected. Trying --force-with-lease (safe force)."
+            git push --force-with-lease origin HEAD:"$BRANCH"
+          fi
