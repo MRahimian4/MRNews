@@ -1,7 +1,7 @@
 # scripts/fetch_data.py
-# جمع‌آوری نرخ‌ها (USD→IRR, EUR→IRR, XAU→USD) + خبرهای RSS
+# نرخ‌ها (USD→IRR, EUR→IRR, XAU→USD) + خبرهای RSS/Atom
 # خروجی‌ها: docs/data/fx_latest.json , docs/data/gold_latest.json , docs/data/news_macro.json
-# پایدار در برابر خطا؛ زمان خبرها به ISO-UTC تبدیل می‌شود تا فیلتر زمانی درست کار کند.
+# پایدار در برابر خطا؛ برای اخبار: published (ISO-UTC) + published_ts (ms epoch)
 
 from __future__ import annotations
 import json, os, sys, datetime as dt
@@ -52,7 +52,7 @@ def to_iso_utc(s: str) -> str:
     """تبدیل رشته‌های زمان RSS/Atom به ISO-UTC (YYYY-MM-DDTHH:MM:SSZ)"""
     if not s:
         return dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    # 1) تلاش با RFC822 (pubDate)
+    # RFC822 (pubDate)
     try:
         from email.utils import parsedate_to_datetime
         d = parsedate_to_datetime(s)
@@ -61,7 +61,7 @@ def to_iso_utc(s: str) -> str:
         return d.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     except Exception:
         pass
-    # 2) تلاش با ISOهای مختلف
+    # ISO
     try:
         z = s.replace("Z", "+00:00")
         d2 = dt.datetime.fromisoformat(z)
@@ -71,19 +71,29 @@ def to_iso_utc(s: str) -> str:
     except Exception:
         return dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def iso_to_epoch_ms(iso: str) -> int:
+    try:
+        z = iso.replace("Z", "+00:00")
+        d = dt.datetime.fromisoformat(z)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=dt.timezone.utc)
+        return int(d.timestamp() * 1000)
+    except Exception:
+        return int(dt.datetime.utcnow().timestamp() * 1000)
+
 # ---------------------------- FX
 
-def timeseries(base: str, symbol: str, days: int = 30) -> List[Dict[str, Any]]:
+def timeseries(base: str, symbol: str, days: int = 30):
     end = dt.date.today()
     start = end - dt.timedelta(days=days)
     url = ("https://api.exchangerate.host/timeseries"
            f"?start_date={start}&end_date={end}&base={base}&symbols={symbol}")
     data = http_get_json(url)
-    out: List[Dict[str, Any]] = []
+    out = []
     rates = (data or {}).get("rates", {})
     for day, vals in sorted(rates.items()):
         val = (vals or {}).get(symbol)
-        if val is None: 
+        if val is None:
             continue
         out.append({"t": f"{day}T12:00:00Z", "v": round(float(val), 6)})
     return out
@@ -96,11 +106,11 @@ def latest(base: str, symbol: str) -> Optional[float]:
     val = (data.get("rates") or {}).get(symbol)
     return round(float(val), 6) if val is not None else None
 
-def fallback_flat_series(days: int, value: float) -> List[Dict[str, Any]]:
+def fallback_flat_series(days: int, value: float):
     end = dt.date.today()
     start = end - dt.timedelta(days=days)
     cur = start
-    out: List[Dict[str, Any]] = []
+    out = []
     while cur <= end:
         out.append({"t": f"{cur}T12:00:00Z", "v": value})
         cur += dt.timedelta(days=1)
@@ -133,7 +143,7 @@ def build_gold() -> None:
         "series": [{"label": "طلا (XAU→USD)", "unit": "USD", "points": xau_usd}]
     })
 
-# ---------------------------- News (RSS/Atom)
+# ---------------------------- News
 
 def build_news() -> None:
     feeds = [
@@ -148,6 +158,7 @@ def build_news() -> None:
         ET = None  # type: ignore
 
     if ET is not None:
+        ATOM_NS = "{http://www.w3.org/2005/Atom}"
         for url in feeds:
             try:
                 raw = http_get_bytes(url, timeout=20)
@@ -155,7 +166,7 @@ def build_news() -> None:
                     continue
                 root = ET.fromstring(raw)
 
-                # RSS items
+                # RSS
                 for it in root.findall(".//item"):
                     title = (it.findtext("title") or "").strip()
                     link  = (it.findtext("link") or "").strip()
@@ -164,14 +175,14 @@ def build_news() -> None:
                     if title and link:
                         items.append({
                             "title": title,
-                            "source": (urlparse(link).netloc or "RSS"),
-                            "published": pub,      # ← همیشه ISO-UTC
+                            "source": urlparse(link).netloc or "RSS",
+                            "published": pub,
+                            "published_ts": iso_to_epoch_ms(pub),
                             "summary": desc[:280],
                             "url": link,
                         })
 
-                # Atom entries
-                ATOM_NS = "{http://www.w3.org/2005/Atom}"
+                # Atom
                 for entry in root.findall(f".//{ATOM_NS}entry"):
                     title  = (entry.findtext(f"{ATOM_NS}title") or "").strip()
                     linkEl = entry.find(f"{ATOM_NS}link")
@@ -182,8 +193,9 @@ def build_news() -> None:
                     if title and link:
                         items.append({
                             "title": title,
-                            "source": (urlparse(link).netloc or "Atom"),
-                            "published": pub,      # ← ISO-UTC
+                            "source": urlparse(link).netloc or "Atom",
+                            "published": pub,
+                            "published_ts": iso_to_epoch_ms(pub),
                             "summary": summ[:280],
                             "url": link,
                         })
@@ -191,18 +203,19 @@ def build_news() -> None:
                 continue
 
     if not items:
-        now = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_iso = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         items = [{
             "title": "نمونه خبر: دادهٔ RSS در دسترس نبود",
             "source": "Demo",
-            "published": now,
+            "published": now_iso,
+            "published_ts": iso_to_epoch_ms(now_iso),
             "summary": "برای تست ظاهر سایت. ممکن است دسترسی شبکه‌ی Runner محدود باشد.",
             "url": "https://example.com/"
         }]
 
-    # مرتب‌سازی نزولی زمان
-    items.sort(key=lambda x: x.get("published",""), reverse=True)
-    save_json(os.path.join(DATA_DIR, "news_macro.json"), {"items": items[:30]})
+    # مرتب‌سازی بر اساس timestamp و محدودسازی
+    items.sort(key=lambda x: x.get("published_ts", 0), reverse=True)
+    save_json(os.path.join(DATA_DIR, "news_macro.json"), {"items": items[:100]})
 
 # ---------------------------- main
 
@@ -211,7 +224,7 @@ def main() -> int:
         build_fx()
         build_gold()
         build_news()
-        print("DONE (ISO timestamps ready)")
+        print("DONE (news timestamps included)")
         return 0
     except Exception as e:
         # خروجی حداقلی حتی در خطای غیرمنتظره
@@ -224,12 +237,13 @@ def main() -> int:
                 "series": [{"label": "طلا (XAU→USD)", "unit": "USD",
                             "points": fallback_flat_series(7, 2300.0)}]
             })
-            now = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            now_iso = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
             save_json(os.path.join(DATA_DIR, "news_macro.json"), {
                 "items": [{
                     "title": "نمونه خبر (fallback)",
                     "source": "Local",
-                    "published": now,
+                    "published": now_iso,
+                    "published_ts": iso_to_epoch_ms(now_iso),
                     "summary": "اجرای اسکریپت با خطا مواجه شد اما فایل‌های جایگزین نوشته شد.",
                     "url": "https://example.com/"
                 }]
