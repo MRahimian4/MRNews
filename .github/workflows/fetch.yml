@@ -1,0 +1,35 @@
+name: Fetch real data and publish JSON
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # هر 3 ساعت (UTC)
+  workflow_dispatch: {}      # اجرای دستی
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run fetch script
+        run: python scripts/fetch_data.py
+
+      - name: Commit data files
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(data): update fx/gold/news JSON"
+          file_pattern: docs/data/*.json
