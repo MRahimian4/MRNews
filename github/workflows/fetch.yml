@@ -3,11 +3,7 @@ name: Fetch real data and publish JSON
 on:
   workflow_dispatch:
   schedule:
-    - cron: "5 * * * *"   # هر ساعت در دقیقه ۵ (UTC) — اگر می‌خواهی هر 3 ساعت باشد: "0 */3 * * *"
-  push:
-    paths:
-      - "scripts/**"
-      - ".github/workflows/fetch.yml"
+    - cron: "5 * * * *"   # هر ساعت در دقیقه ۵ (UTC)
 
 permissions:
   contents: write
@@ -23,7 +19,7 @@ jobs:
       - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # برای rebase لازم است
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,15 +33,14 @@ jobs:
 
       - name: Run fetch script
         env:
-          # اختیاری (برای ترجمه):
-          LT_URL: ${{ secrets.LT_URL }}
-          LT_API_KEY: ${{ secrets.LT_API_KEY }}
-          # اختیاری (برای دقت بالاتر قیمت طلا):
-          METALS_PROVIDER: ${{ secrets.METALS_PROVIDER }}   # metalpriceapi | metalsapi | goldapi
-          METALS_API_KEY: ${{ secrets.METALS_API_KEY }}
-          # محدودیت‌ها (دلخواه):
+          FREE_MARKET_PROVIDER: priceto          # priceto | bonbast | tgju
+          FREE_MARKET_API_KEY: ${{ secrets.FREE_MARKET_API_KEY }}   # در priceto فعلاً لازم نیست
+          BONBAST_API_KEY:      ${{ secrets.BONBAST_API_KEY }}      # اگر Bonbast داشتی
+          TGJU_API_KEY:         ${{ secrets.TGJU_API_KEY }}         # اگر TGJU داشتی
+          METALS_PROVIDER:      ${{ secrets.METALS_PROVIDER }}
+          METALS_API_KEY:       ${{ secrets.METALS_API_KEY }}
           IMAGE_FETCH_LIMIT: "12"
-          TRANSLATE_LIMIT: "30"
+          TRANSLATE_LIMIT:  "30"
         run: python scripts/fetch_data.py
 
       - name: Commit & Push data (with rebase)
@@ -53,26 +48,14 @@ jobs:
           set -e
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add docs/data/*.json || true
-
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-
-          git commit -m "data: auto-update rates/news $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-
-          # شاخهٔ فعلی (main یا هرچی) از متغیر محیطی
+          git commit -m "data: auto-update (free-market fx + gold + news) $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           BRANCH="${{ github.ref_name }}"
-
-          # ادغام تغییرات جدید ریموت، بدون Merge commit
           git pull --rebase --autostash origin "$BRANCH" || true
-
-          # تلاش برای Push معمولی
-          if git push origin HEAD:"$BRANCH"; then
-            echo "Pushed successfully."
-          else
-            echo "Normal push rejected. Trying --force-with-lease (safe force)."
+          if ! git push origin HEAD:"$BRANCH"; then
             git push --force-with-lease origin HEAD:"$BRANCH"
           fi
